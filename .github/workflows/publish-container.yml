@@ -20,7 +20,9 @@ jobs:
           printf 'name=ghcr.io/%s\nversion=%s\n' "$repository" "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - name: Authenticate to GitHub Container Registry
         shell: bash
-        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
       - name: Build and publish versioned image
         shell: bash
         run: |
