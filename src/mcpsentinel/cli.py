@@ -25,7 +25,7 @@ from .dynamic import DynamicConfig, DynamicInvocation, DynamicValidationError
 from .models import Severity, TargetConfig
 from .reporting import terminal_report, write_report
 from .semantic import build_judge
-from .service import reaches_fail_threshold, scan
+from .service import approve_baseline, reaches_fail_threshold, scan
 
 _ONBOARDING_BANNER = """+----------------------------------------------------------------+
 |                          MCPSENTINEL                           |
@@ -111,12 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument(
         "--approve-baseline",
         action="store_true",
-        help="Explicitly replace the approved metadata baseline after reviewing this scan.",
+        help="Deprecated and rejected; use 'baseline approve' with a reviewed fingerprint.",
     )
     scan_parser.add_argument(
         "--no-baseline-update",
         action="store_true",
-        help="Compatibility option; scans preserve the baseline unless --approve-baseline is set.",
+        help="Compatibility option; scans always preserve the approved baseline.",
     )
     scan_parser.add_argument(
         "--judge",
@@ -161,6 +161,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dynamic_group.add_argument("--dynamic-timeout", type=_positive_seconds, default=10)
     dynamic_group.add_argument("--dynamic-confidence", type=_confidence, default=0.80)
+
+    baseline_parser = commands.add_parser(
+        "baseline", help="Approve a reviewed MCP definition as the local trust baseline."
+    )
+    baseline_commands = baseline_parser.add_subparsers(dest="baseline_command", required=True)
+    approve_parser = baseline_commands.add_parser(
+        "approve", help="Rediscover and approve only a reviewed definition fingerprint."
+    )
+    approve_parser.add_argument("target", help="HTTP MCP URL or a quoted stdio command.")
+    approve_parser.add_argument("--transport", choices=("auto", "http", "stdio"), default="auto")
+    approve_parser.add_argument(
+        "--command", help="Stdio executable; overrides command parsed from target."
+    )
+    approve_parser.add_argument(
+        "--arg",
+        action="append",
+        default=[],
+        help="Argument for --command; use --arg=-m for values beginning with '-'. Repeatable.",
+    )
+    approve_parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Explicit environment value for the trusted stdio child; values are never reported.",
+    )
+    approve_parser.add_argument(
+        "--inherit-env",
+        action="store_true",
+        help="UNSAFE: forward the scanner environment to the trusted stdio child.",
+    )
+    approve_parser.add_argument(
+        "--baseline-dir",
+        type=Path,
+        default=Path("~/.mcpsentinel"),
+        help="Baseline root containing baselines/ and judge-cache/ (default: ~/.mcpsentinel).",
+    )
+    approve_parser.add_argument(
+        "--fingerprint",
+        required=True,
+        help="Reviewed SHA-256 definition fingerprint, with optional sha256: prefix.",
+    )
 
     benchmark_parser = commands.add_parser(
         "benchmark", help="Measure labelled scanner behavior against a benchmark dataset."
@@ -246,8 +288,10 @@ server tools. Dynamic tool validation is a separate explicit opt-in.
 
 3. Review the baseline diff on later scans. Baselines default to:
    ~/.mcpsentinel/baselines
-   After review, create or replace one explicitly:
-   {first_scan} --approve-baseline
+   A scan prints a definition fingerprint. After reviewing that exact scan,
+   rediscover and approve it explicitly:
+   mcpsentinel baseline approve {shlex.quote(target or 'http://localhost:8000/mcp')} \\
+     --fingerprint sha256:<fingerprint>
 
 4. Optional semantic review:
    {openai_hint}
@@ -309,7 +353,9 @@ def _print_onboarding(target: str | None, transport: str, color: str) -> None:
     steps.add_column(style="bold cyan", no_wrap=True)
     steps.add_column()
     steps.add_row("01", "Discover MCP metadata without invoking server tools.")
-    steps.add_row("02", "Review findings and approve a baseline only after you trust it.")
+    steps.add_row(
+        "02", "Review the definition fingerprint; approve it separately only after you trust it."
+    )
     steps.add_row("03", "Export SARIF when you are ready to enforce the review in CI.")
     console.print("[bold]Your first three steps[/]")
     console.print(steps)
@@ -384,8 +430,11 @@ def _target_from_args(args: argparse.Namespace) -> TargetConfig:
 
 
 async def _run_scan(args: argparse.Namespace) -> int:
-    if args.approve_baseline and args.no_baseline_update:
-        raise ValueError("--approve-baseline cannot be combined with --no-baseline-update.")
+    if args.approve_baseline:
+        raise ValueError(
+            "--approve-baseline is deprecated. Review the scan fingerprint, then use "
+            "'mcpsentinel baseline approve ... --fingerprint sha256:<fingerprint>'."
+        )
     target = _target_from_args(args)
     rich_text_output = args.format == "text" and (sys.stdout.isatty() or args.color == "always")
     console = _console(args.color) if rich_text_output else None
@@ -404,7 +453,7 @@ async def _run_scan(args: argparse.Namespace) -> int:
         rules_path=args.rules,
         policy_path=args.policy,
         baseline_root=args.baseline_dir,
-        update_baseline=args.approve_baseline,
+        update_baseline=False,
         judge_kind=args.judge,
         judge_model=args.judge_model,
         semantic_threshold=args.semantic_threshold,
@@ -419,6 +468,28 @@ async def _run_scan(args: argparse.Namespace) -> int:
         print(rendered, end="")
     threshold = None if args.fail_on == "none" else Severity(args.fail_on)
     return 1 if reaches_fail_threshold(report, threshold) else 0
+
+
+async def _run_baseline_approve(args: argparse.Namespace) -> int:
+    target = _target_from_args(args)
+    if target.transport == "stdio" and (sys.stdout.isatty() or args.color == "always"):
+        console = _console(args.color)
+        console.print("[bold yellow]⚠ Stdio target execution[/]")
+        console.print(
+            Panel(
+                Text(_STDIO_EXECUTION_WARNING),
+                border_style="yellow",
+                box=box.ROUNDED,
+            )
+        )
+    fingerprint = await approve_baseline(
+        target,
+        baseline_root=args.baseline_dir,
+        reviewed_fingerprint=args.fingerprint,
+    )
+    print("Baseline approved after a matching rediscovery.")
+    print(f"Definition fingerprint: sha256:{fingerprint}")
+    return 0
 
 
 async def _run_benchmark(args: argparse.Namespace) -> int:
@@ -478,7 +549,11 @@ def main(argv: list[str] | None = None) -> int:
         _print_onboarding(args.target, args.transport, args.color)
         return 0
     try:
-        runner = _run_scan if args.command_name == "scan" else _run_benchmark
+        runner = {
+            "scan": _run_scan,
+            "benchmark": _run_benchmark,
+            "baseline": _run_baseline_approve,
+        }[args.command_name]
         return asyncio.run(runner(args))
     except (
         BenchmarkConfigurationError,

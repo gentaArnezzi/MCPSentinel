@@ -37,9 +37,10 @@ mcp = MCPServer(
         "never performed and baselines are never approved from this MCP-native interface."
     ),
     annotations=types.ToolAnnotations(
+        readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
-        openWorldHint=False,
+        openWorldHint=True,
     ),
     structured_output=True,
 )

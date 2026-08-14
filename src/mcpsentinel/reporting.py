@@ -51,6 +51,7 @@ def sarif_report(report: ScanReport) -> str:
                             "transport": report.target.transport,
                             "judge": report.judge,
                             "baseline_state": report.baseline_state,
+                            "definition_fingerprint": report.definition_fingerprint,
                             "notices": report.notices,
                         },
                     }
@@ -75,6 +76,8 @@ def text_report(report: ScanReport) -> str:
         f"Risk score: {report.risk_score}/100 ({report.risk_level.value})",
         f"Findings: {counts}",
     ]
+    if report.definition_fingerprint:
+        lines.insert(3, f"Definition fingerprint: sha256:{report.definition_fingerprint}")
     if report.notices:
         lines.extend(["", "Notes:"])
         lines.extend(f"- {notice}" for notice in report.notices)
@@ -150,6 +153,13 @@ def terminal_report(report: ScanReport, console: Console | None = None) -> None:
     )
     summary.add_row("Risk score", f"{report.risk_score}/100 ({report.risk_level.value})")
     console.print(summary)
+    if report.definition_fingerprint:
+        console.print(
+            Text.assemble(
+                ("Definition fingerprint: ", "dim"),
+                (f"sha256:{report.definition_fingerprint}", "cyan"),
+            )
+        )
 
     if report.findings:
         table = Table(title="Findings", box=box.SIMPLE_HEAVY, expand=False)

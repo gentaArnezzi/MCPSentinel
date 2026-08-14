@@ -160,14 +160,15 @@ mcpsentinel scan http://localhost:8000/mcp --format html --output risk-report.ht
 # Use OpenAI's structured-output semantic judge (OPENAI_API_KEY is required)
 mcpsentinel scan http://localhost:8000/mcp --judge openai --judge-model gpt-4o-mini
 
-# Use a repository-local directory for reviewed baseline snapshots
-mcpsentinel scan http://localhost:8000/mcp --baseline-dir .mcpsentinel/baselines
+# Scan using a repository-local baseline root (it contains baselines/ and judge-cache/)
+mcpsentinel scan http://localhost:8000/mcp --baseline-dir .mcpsentinel
 
-# Create or replace a baseline only after reviewing the report
-mcpsentinel scan http://localhost:8000/mcp --baseline-dir .mcpsentinel/baselines --approve-baseline
+# After reviewing the scan's displayed fingerprint, rediscover and approve only that exact state
+mcpsentinel baseline approve http://localhost:8000/mcp --baseline-dir .mcpsentinel \\
+  --fingerprint sha256:<reviewed-fingerprint>
 ```
 
-Baseline snapshots are kept in `~/.mcpsentinel/baselines` by default, but are **never updated by an ordinary scan**. A changed, added, or removed descriptor is surfaced as an `MCP-B001` rug-pull review finding while the prior approved snapshot is preserved. For changes, the report identifies whether the description, input schema, and/or metadata changed without storing a raw historical descriptor. Review the report, then use `--approve-baseline` deliberately to create or replace the snapshot. This prevents an unattended scan from silently accepting a rug-pull change.
+`--baseline-dir` is a root directory: by default it is `~/.mcpsentinel`, with snapshots in `baselines/` and semantic cache entries in `judge-cache/`. An ordinary scan **never updates** a baseline. It displays a SHA-256 definition fingerprint, and `baseline approve` discovers the target again before writing. Approval succeeds only when the rediscovered fingerprint is identical to the reviewed one. A changed, added, or removed descriptor is surfaced as an `MCP-B001` rug-pull review finding while the prior approved snapshot is preserved. For changes, the report identifies whether the description, input schema, and/or metadata changed without storing a raw historical descriptor.
 
 The first scan reports that no approved baseline exists. That is an onboarding state, not a vulnerability finding. Establish a baseline only from a server version and environment you trust.
 
@@ -177,7 +178,7 @@ The risk score is a capped 0–100 weighted sum of severity and semantic confide
 
 `--judge heuristic` is the default and is fully offline. `--judge openai` requires `OPENAI_API_KEY`; `--judge auto` opts into using OpenAI when that key is present, otherwise it uses the heuristic. The OpenAI judge uses the Python SDK's Responses structured-output API, so an API response cannot bypass the scanner's expected verdict schema. Results are cached by descriptor hash plus a versioned judge/prompt identity in the baseline directory to avoid repeat API charges without retaining verdicts after judging methodology changes.
 
-Each OpenAI judgement uses a 30-second client deadline and at most two SDK retries. Before an OpenAI request, MCPSentinel redacts common API keys, bearer credentials, private keys, and secret-valued JSON fields. Prompts are capped at 12,000 characters with field-aware head-and-tail excerpts, so a long descriptor cannot simply hide all final evidence behind filler. Candidate assessment uses a bounded concurrency of four requests. Redaction is defense-in-depth, not a guarantee that arbitrary sensitive metadata is safe to send. Choose `heuristic` when metadata must remain local.
+Each OpenAI judgement uses a 30-second client deadline and at most two SDK retries. Before an OpenAI request, MCPSentinel recursively redacts secret-valued structured fields, then redacts common API keys, bearer credentials, and private keys in text. Prompts are capped at 12,000 characters with field-aware head-and-tail excerpts, so a long descriptor cannot simply hide all final evidence behind filler. Candidate assessment uses a bounded concurrency of four requests. Redaction is defense-in-depth, not a guarantee that arbitrary sensitive metadata is safe to send. Choose `heuristic` when metadata must remain local.
 
 If `--judge auto` encounters an OpenAI outage or malformed response, the scan completes with the offline heuristic and emits a visible report note; a fallback verdict is not cached as an OpenAI verdict. `--judge openai` remains strict and fails rather than silently changing the configured provider.
 
@@ -248,7 +249,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.8.5
+- uses: gentaArnezzi/MCPSentinel@v0.8.6
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -260,21 +261,23 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
     sarif_file: ${{ steps.mcpsentinel.outputs.sarif }}
 ```
 
-Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
+The Action restores the newest branch-scoped baseline cache and saves a fresh immutable cache after each successful run, so reviewed baselines and semantic cache entries persist instead of becoming stuck at their first value. The cache is workflow convenience state, not a replacement for protected branches or review.
+
+To approve a baseline, first review a scan's `definition-fingerprint` output. Then pass that exact value into a separate trusted workflow on a protected branch. The Action rediscovers the server and refuses the approval if its definition has changed. Do not enable approval for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.8.5
+- uses: gentaArnezzi/MCPSentinel@v0.8.6
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
     transport: http
-    approve-baseline: "true"
+    approve-baseline-fingerprint: "sha256:<fingerprint-you-reviewed>"
 ```
 
 The Action rejects stdio targets by default because scanning them starts a process on the GitHub runner. Only enable one for source you control in a trusted, protected push workflow—never an untrusted pull request or fork:
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.8.5
+- uses: gentaArnezzi/MCPSentinel@v0.8.6
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: python server.py
@@ -293,9 +296,9 @@ export MCPSENTINEL_ALLOWED_HOSTS="mcp.example.com,localhost"
 mcpsentinel-mcp
 ```
 
-The allowlist accepts either `host` or an exact `host:port`. HTTP redirects are refused, each discovery session has a 30-second deadline, and private or reserved addresses are denied by default. For public MCP-native HTTP scans, the validated DNS address set is pinned to the HTTP transport while the original hostname remains the HTTP Host and TLS SNI name; this prevents a second DNS lookup from changing a validated public hostname into an internal destination. For a deliberately trusted local network, set `MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS=true` alongside its exact allowlist entry.
+The allowlist accepts either `host` or an exact `host:port`. HTTP redirects are refused, each discovery session has a 30-second deadline, raw HTTP responses are limited to 2 MiB before MCP decoding, and private or reserved addresses are denied by default. The validated DNS address set is pinned to the HTTP transport while the original hostname remains the HTTP Host and TLS SNI name; this applies even when a trusted private network is explicitly allowed, preventing a second DNS lookup from changing the connected address.
 
-Optional operator settings are `MCPSENTINEL_MCP_BASELINE_DIR`, `MCPSENTINEL_RULES_PATH`, `MCPSENTINEL_POLICY_PATH`, `MCPSENTINEL_MCP_JUDGE`, and `MCPSENTINEL_MCP_JUDGE_MODEL`. The MCP caller cannot choose arbitrary policy files or baseline paths, and MCP-native scans never approve a baseline. For a trusted stdio server, use the human CLI and run `--approve-baseline` only after reviewing the report.
+Optional operator settings are `MCPSENTINEL_MCP_BASELINE_DIR`, `MCPSENTINEL_RULES_PATH`, `MCPSENTINEL_POLICY_PATH`, `MCPSENTINEL_MCP_JUDGE`, and `MCPSENTINEL_MCP_JUDGE_MODEL`. The MCP caller cannot choose arbitrary policy files or baseline paths, and MCP-native scans never approve a baseline. For a trusted stdio server, use the human CLI: review its scan fingerprint, then use `mcpsentinel baseline approve` with that fingerprint.
 
 ## Registry publication
 
@@ -308,8 +311,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.5
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.5 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.6
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.6 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:

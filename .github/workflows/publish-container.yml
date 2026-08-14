@@ -27,7 +27,8 @@ jobs:
         shell: bash
         run: |
           docker build --tag "${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}" .
-          docker run --rm --read-only --user 10001:10001 "${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}" --version
+          runtime_version="$(docker run --rm --read-only --user 10001:10001 "${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}" --version | awk '{print $2}')"
+          test "$runtime_version" = "${{ steps.image.outputs.version }}"
       - name: Publish versioned image
         shell: bash
         run: |

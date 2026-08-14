@@ -32,11 +32,12 @@ def test_changed_definition_is_detected_as_rug_pull(tmp_path) -> None:
     assert "changed fields: description" in comparison.findings[0].evidence[0]
 
 
-def test_snapshot_does_not_store_http_userinfo(tmp_path) -> None:
+def test_snapshot_does_not_store_http_url_credentials(tmp_path) -> None:
+    secret = "super-secret-value"
     target = TargetConfig(
         transport="http",
-        identity="https://user:password@example.com/mcp",
-        url="https://user:password@example.com/mcp",
+        identity=f"https://user:{secret}@example.com/mcp?client_secret={secret}&region=id",
+        url=f"https://user:{secret}@example.com/mcp?client_secret={secret}&region=id",
     )
     store = BaselineStore(tmp_path)
 
@@ -44,5 +45,7 @@ def test_snapshot_does_not_store_http_userinfo(tmp_path) -> None:
 
     snapshot = store.load_snapshot(target)
     assert snapshot is not None
-    assert snapshot["target"]["identity"] == "https://example.com/mcp"
-    assert "password" not in str(snapshot)
+    assert snapshot["target"]["identity"] == (
+        "https://example.com/mcp?client_secret=[REDACTED]&region=id"
+    )
+    assert secret not in str(snapshot)

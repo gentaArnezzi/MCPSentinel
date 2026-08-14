@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
+import httpx2
 import pytest
 
 from mcpsentinel import discovery
@@ -31,7 +32,7 @@ async def test_stdio_discovery_scans_metadata_without_invoking_tool(tmp_path: Pa
         rules_path=None,
         policy_path=None,
         baseline_root=tmp_path,
-        update_baseline=True,
+        update_baseline=False,
         judge_kind="heuristic",
         judge_model="unused",
         semantic_threshold=0.70,
@@ -177,6 +178,36 @@ async def test_public_network_restriction_pins_validated_public_addresses(monkey
     addresses = await discovery._require_public_http_destination("https://scanner.example/mcp")
 
     assert addresses == ("2606:4700:4700::1111", "93.184.216.34")
+
+
+async def test_private_network_exception_still_resolves_addresses_for_pinning(monkeypatch) -> None:
+    class Loop:
+        async def getaddrinfo(self, *_: object, **__: object):
+            return [(0, 0, 0, "", ("127.0.0.1", 443))]
+
+    monkeypatch.setattr(discovery.asyncio, "get_running_loop", lambda: Loop())
+
+    addresses = await discovery._resolve_http_destination(
+        "https://scanner.internal/mcp", public_only=False
+    )
+    client = discovery._http_client("https://scanner.internal/mcp", addresses)
+    try:
+        assert isinstance(client._transport, discovery._BoundedResponseTransport)
+        assert isinstance(client._transport._delegate, discovery._PinnedAsyncHTTPTransport)
+    finally:
+        await client.aclose()
+
+
+async def test_http_response_stream_enforces_raw_byte_limit() -> None:
+    class Source(httpx2.AsyncByteStream):
+        async def __aiter__(self):
+            yield b"ab"
+            yield b"c"
+
+    stream = discovery._BoundedAsyncByteStream(Source(), maximum_bytes=2)
+    with pytest.raises(httpx2.StreamError, match="safety limit"):
+        async for _ in stream:
+            pass
 
 
 async def test_pinned_network_backend_never_re_resolves_the_validated_hostname() -> None:

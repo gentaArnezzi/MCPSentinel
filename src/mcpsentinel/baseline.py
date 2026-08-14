@@ -27,6 +27,28 @@ def stable_hash(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def definition_fingerprint(target: TargetConfig, descriptors: list[ToolDescriptor]) -> str:
+    """Return a stable identity for exactly the MCP definition that was reviewed.
+
+    The endpoint identity is credential-safe and descriptors are ordered by their
+    public key, so a server returning the same definition in a different order
+    does not invalidate a human review.
+    """
+    return stable_hash(
+        {
+            "format": "mcpsentinel-definition-v1",
+            "target": {
+                "transport": target.transport,
+                "identity": safe_target_identity(target),
+            },
+            "descriptors": [
+                {"key": descriptor.key, "sha256": stable_hash(descriptor)}
+                for descriptor in sorted(descriptors, key=lambda item: item.key)
+            ],
+        }
+    )
+
+
 @dataclass(frozen=True)
 class BaselineComparison:
     findings: list[Finding]
@@ -42,6 +64,13 @@ class BaselineStore:
         self.cache_dir = self.root / "judge-cache"
 
     def _target_key(self, target: TargetConfig) -> str:
+        return stable_hash(
+            {"transport": target.transport, "identity": safe_target_identity(target)}
+        )
+
+    @staticmethod
+    def _legacy_target_key(target: TargetConfig) -> str:
+        """Locate safe pre-v0.8.6 snapshots without rewriting their paths."""
         return stable_hash({"transport": target.transport, "identity": target.identity})
 
     def _snapshot_path(self, target: TargetConfig) -> Path:
@@ -52,7 +81,16 @@ class BaselineStore:
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return None
+            legacy_path = self.snapshot_dir / f"{self._legacy_target_key(target)}.json"
+            if legacy_path == path:
+                return None
+            try:
+                return json.loads(legacy_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                return None
+            except (OSError, json.JSONDecodeError) as error:
+                message = f"Could not read baseline snapshot {legacy_path}: {error}"
+                raise RuntimeError(message) from error
         except (OSError, json.JSONDecodeError) as error:
             raise RuntimeError(f"Could not read baseline snapshot {path}: {error}") from error
 
@@ -99,9 +137,10 @@ class BaselineStore:
         descriptor_hashes = {item.key: stable_hash(item) for item in descriptors}
         descriptor_field_hashes = {item.key: _field_hashes(item) for item in descriptors}
         payload = {
-            "version": 2,
+            "version": 3,
             "target": {"transport": target.transport, "identity": safe_target_identity(target)},
             "captured_at": datetime.now(UTC).isoformat(),
+            "definition_fingerprint": definition_fingerprint(target, descriptors),
             "descriptor_hashes": descriptor_hashes,
             "descriptor_field_hashes": descriptor_field_hashes,
         }

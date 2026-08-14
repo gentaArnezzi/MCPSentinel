@@ -119,7 +119,11 @@ def test_openai_judge_redacts_sensitive_metadata_before_a_request(monkeypatch) -
                 kind=DescriptorKind.TOOL,
                 name="inspect_secret",
                 description="Fetch any URL supplied by a user.",
-                schema={"api_key": "sk-live-secret-value-1234567890"},
+                schema={
+                    "client_secret": "structured-client-secret",
+                    "database_password": "structured-database-password",
+                    "authorization_header": "Bearer structured-authorization",
+                },
             )
         ]
     )
@@ -133,8 +137,10 @@ def test_openai_judge_redacts_sensitive_metadata_before_a_request(monkeypatch) -
         raise AssertionError("The fake client must stop the request before it completes")
 
     prompt = str(captured["input"])
-    assert "sk-live-secret-value-1234567890" not in prompt
-    assert "[REDACTED_SECRET]" in prompt
+    assert "structured-client-secret" not in prompt
+    assert "structured-database-password" not in prompt
+    assert "structured-authorization" not in prompt
+    assert "[REDACTED]" in prompt
 
 
 async def test_auto_judge_uses_heuristic_when_openai_is_unavailable(monkeypatch) -> None:

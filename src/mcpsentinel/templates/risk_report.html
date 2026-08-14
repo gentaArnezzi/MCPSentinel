@@ -21,6 +21,7 @@
       <h1>{{ report.target.identity }}</h1>
       <p class="muted">Completed {{ report.completed_at }} · {{ report.descriptors|length }} descriptors · judge: {{ report.judge }}</p>
       <p class="muted">Baseline: {{ report.baseline_state }}{% if report.baseline_updated %} · explicitly approved{% endif %}</p>
+      {% if report.definition_fingerprint %}<p class="muted">Definition fingerprint: <code>sha256:{{ report.definition_fingerprint }}</code></p>{% endif %}
     </header>
     <section class="grid">
       <div class="metric"><div class="muted">Risk score</div><div class="score {{ risk_level }}">{{ risk_score }}/100</div><div class="pill {{ risk_level }}">{{ risk_level }}</div></div>

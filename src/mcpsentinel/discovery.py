@@ -28,6 +28,7 @@ HTTP_READ_TIMEOUT_SECONDS = 20.0
 HTTP_WRITE_TIMEOUT_SECONDS = 10.0
 HTTP_POOL_TIMEOUT_SECONDS = 5.0
 DNS_LOOKUP_TIMEOUT_SECONDS = 5.0
+MAX_HTTP_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_DESCRIPTOR_PAGES = 100
 MAX_DESCRIPTORS_PER_CAPABILITY = 1_000
 MAX_DESCRIPTOR_NAME_BYTES = 4 * 1024
@@ -128,6 +129,59 @@ class _PinnedAsyncHTTPTransport(httpx2.AsyncHTTPTransport):
             retries=0,
             network_backend=_PinnedPublicNetworkBackend(hostname, port, addresses),
         )
+
+
+class _BoundedAsyncByteStream(httpx2.AsyncByteStream):
+    """Abort an HTTP response before the MCP SDK can decode an unbounded body."""
+
+    def __init__(self, stream: httpx2.AsyncByteStream, maximum_bytes: int) -> None:
+        self._stream = stream
+        self._maximum_bytes = maximum_bytes
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        received = 0
+        async for chunk in self._stream:
+            received += len(chunk)
+            if received > self._maximum_bytes:
+                await self.aclose()
+                raise httpx2.StreamError(
+                    f"HTTP response exceeded the {self._maximum_bytes} byte safety limit."
+                )
+            yield chunk
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+
+class _BoundedResponseTransport(httpx2.AsyncBaseTransport):
+    """Apply a raw body ceiling to every Streamable HTTP response."""
+
+    def __init__(self, delegate: httpx2.AsyncBaseTransport, maximum_bytes: int) -> None:
+        self._delegate = delegate
+        self._maximum_bytes = maximum_bytes
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        response = await self._delegate.handle_async_request(request)
+        content_length = response.headers.get("content-length")
+        content_encoding = response.headers.get("content-encoding", "identity").lower()
+        try:
+            declared_bytes = int(content_length) if content_length is not None else None
+        except ValueError:
+            declared_bytes = None
+        if content_encoding not in {"", "identity"}:
+            await response.aclose()
+            raise httpx2.StreamError("HTTP responses with content encoding are not permitted.")
+        if declared_bytes is not None and declared_bytes > self._maximum_bytes:
+            await response.aclose()
+            raise httpx2.StreamError(
+                f"HTTP response exceeded the {self._maximum_bytes} byte safety limit."
+            )
+        assert isinstance(response.stream, httpx2.AsyncByteStream)
+        response.stream = _BoundedAsyncByteStream(response.stream, self._maximum_bytes)
+        return response
+
+    async def aclose(self) -> None:
+        await self._delegate.aclose()
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -265,12 +319,10 @@ async def _session_for(target: TargetConfig) -> AsyncIterator[ClientSession]:
     if target.transport == "http":
         if not target.url:
             raise DiscoveryError("HTTP targets require a URL.")
-        pinned_addresses: tuple[str, ...] | None = None
-        if target.restrict_to_public_network:
-            pinned_addresses = await _require_public_http_destination(target.url)
-        async with _http_client(
-            target.url if pinned_addresses else None, pinned_addresses
-        ) as http_client:
+        pinned_addresses = await _resolve_http_destination(
+            target.url, public_only=target.restrict_to_public_network
+        )
+        async with _http_client(target.url, pinned_addresses) as http_client:
             async with streamable_http_client(target.url, http_client=http_client) as (read, write):
                 async with ClientSession(read, write) as session:
                     yield session
@@ -314,7 +366,7 @@ def _http_client(
     The SDK accepts a caller-owned client, so these controls apply to every
     HTTP request in the MCP session.
     """
-    transport = None
+    transport: httpx2.AsyncBaseTransport
     if pinned_url is not None and pinned_addresses is not None:
         parsed = urlparse(pinned_url)
         if not parsed.hostname:
@@ -324,7 +376,10 @@ def _http_client(
         except ValueError as error:
             raise DiscoveryError("HTTP target has an invalid port.") from error
         transport = _PinnedAsyncHTTPTransport(parsed.hostname, port, pinned_addresses)
+    else:
+        transport = httpx2.AsyncHTTPTransport(retries=0)
     return httpx2.AsyncClient(
+        headers={"Accept-Encoding": "identity"},
         follow_redirects=False,
         trust_env=False,
         timeout=httpx2.Timeout(
@@ -334,16 +389,18 @@ def _http_client(
             write=HTTP_WRITE_TIMEOUT_SECONDS,
             pool=HTTP_POOL_TIMEOUT_SECONDS,
         ),
-        transport=transport,
+        transport=_BoundedResponseTransport(transport, MAX_HTTP_RESPONSE_BYTES),
     )
 
 
-async def _require_public_http_destination(url: str) -> tuple[str, ...]:
-    """Reject a hostname that resolves to a private or reserved address.
+async def _resolve_http_destination(
+    url: str, *, public_only: bool
+) -> tuple[str, ...]:
+    """Resolve and pin an HTTP destination, optionally rejecting non-public IPs.
 
-    This is used only by the MCP-native wrapper after its operator allowlist
-    check. The CLI keeps its local-development behavior, while the wrapper
-    avoids becoming an SSRF pivot for callers that can choose a target URL.
+    Pinning is applied for every HTTP target, including explicitly trusted
+    private networks. The public-only flag controls address policy only; it
+    never weakens DNS rebinding protection.
     """
     parsed = urlparse(url)
     if not parsed.hostname:
@@ -377,12 +434,17 @@ async def _require_public_http_destination(url: str) -> tuple[str, ...]:
             raise DiscoveryError(
                 f"HTTP target returned an invalid IP address: {address}"
             ) from error
-    if non_public:
+    if public_only and non_public:
         raise DiscoveryError(
             "HTTP target resolved to a private or reserved address; set "
             "MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS=true only for a trusted local network."
         )
     return tuple(sorted(addresses))
+
+
+async def _require_public_http_destination(url: str) -> tuple[str, ...]:
+    """Compatibility wrapper for callers requiring public-only resolution."""
+    return await _resolve_http_destination(url, public_only=True)
 
 
 async def _all_pages(session_method: Any, item_field: str) -> list[Any]:

@@ -14,12 +14,12 @@ from pydantic import BaseModel, Field
 
 from .models import Category, JudgeVerdict, StaticCandidate, to_primitive
 from .normalization import normalize_for_analysis
-from .safety import sanitize_text
+from .safety import sanitize_text, sanitize_value
 
 OPENAI_TIMEOUT_SECONDS = 30.0
 OPENAI_MAX_RETRIES = 2
 MAX_OPENAI_PROMPT_CHARS = 12_000
-OPENAI_PROMPT_VERSION = "v2"
+OPENAI_PROMPT_VERSION = "v3"
 
 _OPENAI_INSTRUCTIONS = """You are a defensive security reviewer for Model Context Protocol servers.
 Classify whether the provided static candidate represents an actual security risk.
@@ -255,7 +255,7 @@ def _redacted_excerpt(value: str, limit: int) -> str:
 
 
 def _redacted_json_excerpt(value: object, limit: int) -> str:
-    return _redact_sensitive_text(_json_excerpt(value, limit))
+    return _redact_sensitive_text(_json_excerpt(sanitize_value(value), limit))
 
 
 def _build_openai_prompt(candidate: StaticCandidate) -> str:

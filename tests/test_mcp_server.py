@@ -109,3 +109,7 @@ async def test_mcp_native_stdio_server_exposes_the_scan_tool() -> None:
 
     assert [tool.name for tool in tools.tools] == ["scan_mcp_server"]
     assert "update_baseline" not in tools.tools[0].input_schema.get("properties", {})
+    annotations = tools.tools[0].annotations
+    assert annotations is not None
+    assert annotations.read_only_hint is True
+    assert annotations.open_world_hint is True

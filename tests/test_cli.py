@@ -66,3 +66,28 @@ def test_onboard_detects_but_never_echoes_an_openai_key(capsys, monkeypatch) -> 
     output = capsys.readouterr().out
     assert "OPENAI_API_KEY is detected" in output
     assert "test-secret" not in output
+
+
+def test_scan_rejects_legacy_inline_baseline_approval(capsys) -> None:
+    assert main(["scan", "https://example.com/mcp", "--approve-baseline"]) == 2
+
+    assert "deprecated" in capsys.readouterr().err
+
+
+def test_baseline_approval_requires_a_sha256_fingerprint_before_discovery(capsys) -> None:
+    assert (
+        main(
+            [
+                "baseline",
+                "approve",
+                "https://example.com/mcp",
+                "--transport",
+                "http",
+                "--fingerprint",
+                "not-a-fingerprint",
+            ]
+        )
+        == 2
+    )
+
+    assert "64-character lowercase SHA-256" in capsys.readouterr().err

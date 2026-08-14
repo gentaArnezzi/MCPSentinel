@@ -44,18 +44,24 @@ def test_sarif_is_a_2_1_0_document() -> None:
     payload = json.loads(sarif_report(report))
 
     assert payload["version"] == "2.1.0"
+    assert "definition_fingerprint" in payload["runs"][0]["invocations"][0]["properties"]
     result = payload["runs"][0]["results"][0]
     assert result["ruleId"] == "MCP001"
     assert result["level"] == "error"
 
 
-def test_reports_redact_stdio_environment_values_and_http_userinfo() -> None:
+def test_reports_redact_stdio_environment_values_and_http_url_credentials() -> None:
+    from io import StringIO
+
+    from rich.console import Console
+
     secret = "super-secret-value"
+    target_url = f"https://developer:{secret}@example.com/mcp?api_key={secret}&region=id#token={secret}"
     report = ScanReport(
         target=TargetConfig(
             transport="http",
-            identity=f"https://developer:{secret}@example.com/mcp",
-            url=f"https://developer:{secret}@example.com/mcp",
+            identity=target_url,
+            url=target_url,
             environment={"API_KEY": secret},
         ),
         descriptors=[
@@ -70,16 +76,21 @@ def test_reports_redact_stdio_environment_values_and_http_userinfo() -> None:
         started_at=datetime.now(UTC),
     )
 
+    stream = StringIO()
+    terminal_report(report, Console(file=stream, color_system=None, force_terminal=False))
     rendered_reports = (
         json_report(report),
         sarif_report(report),
         html_report(report),
         text_report(report),
+        stream.getvalue(),
     )
     for rendered in rendered_reports:
         assert secret not in rendered
         assert "developer@" not in rendered
-        assert "https://example.com/mcp" in rendered
+    for rendered in (*rendered_reports[:2], *rendered_reports[3:]):
+        assert "https://example.com/mcp?api_key=[REDACTED]&region=id" in rendered
+    assert "https://example.com/mcp?api_key=[REDACTED]&amp;region=id" in rendered_reports[2]
 
 
 def test_terminal_report_renders_a_branded_human_summary() -> None:

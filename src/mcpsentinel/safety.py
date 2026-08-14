@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
 from .models import TargetConfig, to_primitive
 
@@ -47,30 +47,42 @@ _SENSITIVE_REPLACEMENTS = (
 
 
 def sanitize_url(value: str) -> str:
-    """Remove HTTP URL user-info without changing the destination or path."""
+    """Remove URL credentials and redact sensitive query values for reports."""
     try:
         parsed = urlsplit(value)
     except ValueError:
         return value
-    if not parsed.scheme or parsed.username is None:
+    if not parsed.scheme:
         return value
-    hostname = parsed.hostname
-    if not hostname:
-        return value
-    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
-    try:
-        port = parsed.port
-    except ValueError:
-        return value
-    netloc = f"{host}:{port}" if port is not None else host
-    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+    netloc = parsed.netloc
+    if parsed.username is not None:
+        hostname = parsed.hostname
+        if not hostname:
+            return value
+        host = (
+            f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+        )
+        try:
+            port = parsed.port
+        except ValueError:
+            return value
+        netloc = f"{host}:{port}" if port is not None else host
+    return urlunsplit((parsed.scheme, netloc, parsed.path, _sanitize_query(parsed.query), ""))
 
 
 def sanitize_text(value: str) -> str:
     """Redact credential-shaped strings and credentials embedded in HTTP URLs."""
-    redacted = _URL.sub(lambda match: sanitize_url(match.group(0)), value)
+    urls: list[str] = []
+
+    def replace_url(match: re.Match[str]) -> str:
+        urls.append(sanitize_url(match.group(0)))
+        return f"\x00MCPSENTINEL_SAFE_URL_{len(urls) - 1}\x00"
+
+    redacted = _URL.sub(replace_url, value)
     for pattern, replacement in _SENSITIVE_REPLACEMENTS:
         redacted = pattern.sub(replacement, redacted)
+    for index, url in enumerate(urls):
+        redacted = redacted.replace(f"\x00MCPSENTINEL_SAFE_URL_{index}\x00", url)
     return redacted
 
 
@@ -136,3 +148,17 @@ def _safe_command_arguments(arguments: tuple[str, ...]) -> list[str]:
         else:
             safe.append(sanitize_text(argument))
     return safe
+
+
+def _sanitize_query(query: str) -> str:
+    """Keep non-sensitive parameters while replacing values for sensitive keys."""
+    if not query:
+        return query
+    sanitized: list[str] = []
+    for part in query.split("&"):
+        key, separator, _ = part.partition("=")
+        if _SENSITIVE_FIELD.search(unquote_plus(key)):
+            sanitized.append(f"{key}=[REDACTED]")
+        else:
+            sanitized.append(part)
+    return "&".join(sanitized)

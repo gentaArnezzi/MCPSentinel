@@ -26,13 +26,19 @@ inputs:
     required: false
     default: mcpsentinel.sarif
   baseline-dir:
-    description: Approved baseline and judge-cache directory, normally persisted by the workflow cache.
+    description: Approved baseline and judge-cache directory, persisted with immutable per-run caches.
     required: false
     default: .mcpsentinel
   approve-baseline:
-    description: "Set true only in a reviewed, trusted workflow to replace the approved baseline."
+    description: Deprecated. Use approve-baseline-fingerprint from a separately reviewed scan.
     required: false
     default: "false"
+  approve-baseline-fingerprint:
+    description: >-
+      Reviewed definition fingerprint to verify and approve in a separate trusted workflow.
+      The approval fails if the server definition has changed.
+    required: false
+    default: ""
   rules:
     description: Optional additive JSON rule file path.
     required: false
@@ -49,17 +55,22 @@ outputs:
   sarif:
     description: Path to the generated SARIF report.
     value: ${{ inputs.report-path }}
+  definition-fingerprint:
+    description: Fingerprint of the definition scanned in this Action run.
+    value: ${{ steps.scan.outputs.definition_fingerprint }}
 runs:
   using: composite
   steps:
-    - name: Restore MCPSentinel baseline cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    - name: Restore latest MCPSentinel baseline cache
+      id: baseline-cache-restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.baseline-dir }}
-        key: mcpsentinel-${{ runner.os }}-${{ github.repository }}-${{ github.ref_name }}
+        key: mcpsentinel-${{ runner.os }}-${{ github.repository }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          mcpsentinel-${{ runner.os }}-${{ github.repository }}-
-    - shell: bash
+          mcpsentinel-${{ runner.os }}-${{ github.repository }}-${{ github.ref_name }}-
+    - id: scan
+      shell: bash
       env:
         INPUT_TARGET: ${{ inputs.target }}
         INPUT_TRANSPORT: ${{ inputs.transport }}
@@ -68,10 +79,15 @@ runs:
         INPUT_REPORT_PATH: ${{ inputs.report-path }}
         INPUT_BASELINE_DIR: ${{ inputs.baseline-dir }}
         INPUT_APPROVE_BASELINE: ${{ inputs.approve-baseline }}
+        INPUT_APPROVE_BASELINE_FINGERPRINT: ${{ inputs.approve-baseline-fingerprint }}
         INPUT_RULES: ${{ inputs.rules }}
         INPUT_POLICY: ${{ inputs.policy }}
         INPUT_JUDGE: ${{ inputs.judge }}
       run: |
+        if [[ "$INPUT_APPROVE_BASELINE" == "true" ]]; then
+          echo "::error::approve-baseline is deprecated. Review a prior scan, then use approve-baseline-fingerprint in a separate trusted workflow."
+          exit 2
+        fi
         effective_transport="$INPUT_TRANSPORT"
         if [[ "$effective_transport" == "auto" ]]; then
           case "$INPUT_TARGET" in
@@ -87,7 +103,26 @@ runs:
         python -m pip install --no-deps --no-build-isolation "$GITHUB_ACTION_PATH"
         python -m pip check
         command=(scan "$INPUT_TARGET" --transport "$INPUT_TRANSPORT" --format sarif --output "$INPUT_REPORT_PATH" --baseline-dir "$INPUT_BASELINE_DIR" --judge "$INPUT_JUDGE" --fail-on "$INPUT_FAIL_ON")
-        if [[ "$INPUT_APPROVE_BASELINE" == "true" ]]; then command+=(--approve-baseline); fi
         if [[ -n "$INPUT_RULES" ]]; then command+=(--rules "$INPUT_RULES"); fi
         if [[ -n "$INPUT_POLICY" ]]; then command+=(--policy "$INPUT_POLICY"); fi
         mcpsentinel "${command[@]}"
+        fingerprint="$(python - "$INPUT_REPORT_PATH" <<'PY'
+        import json
+        import sys
+
+        with open(sys.argv[1], encoding="utf-8") as report_file:
+            report = json.load(report_file)
+        print(report["runs"][0]["invocations"][0]["properties"]["definition_fingerprint"])
+        PY
+        )"
+        echo "definition_fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+        if [[ -n "$INPUT_APPROVE_BASELINE_FINGERPRINT" ]]; then
+          approval=(baseline approve "$INPUT_TARGET" --transport "$INPUT_TRANSPORT" --baseline-dir "$INPUT_BASELINE_DIR" --fingerprint "$INPUT_APPROVE_BASELINE_FINGERPRINT")
+          mcpsentinel "${approval[@]}"
+        fi
+    - name: Save updated MCPSentinel baseline cache
+      if: ${{ success() }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.baseline-dir }}
+        key: ${{ steps.baseline-cache-restore.outputs.cache-primary-key }}

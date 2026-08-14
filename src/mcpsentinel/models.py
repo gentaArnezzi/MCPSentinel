@@ -163,6 +163,7 @@ class ScanReport:
     dynamic_observations: list[DynamicObservation] = field(default_factory=list)
     baseline_state: str = "not_checked"
     baseline_updated: bool = False
+    definition_fingerprint: str | None = None
     notices: list[str] = field(default_factory=list)
 
     def complete(self) -> None:

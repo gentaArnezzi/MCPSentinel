@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from hmac import compare_digest
 from pathlib import Path
 
-from .baseline import BaselineStore, stable_hash
+from .baseline import BaselineStore, definition_fingerprint, stable_hash
 from .discovery import discover
 from .dynamic import DynamicConfig, run_dynamic_validation
 from .models import (
@@ -25,6 +26,10 @@ from .semantic import SemanticJudge, build_judge
 MAX_SEMANTIC_CONCURRENCY = 4
 
 
+class BaselineApprovalError(RuntimeError):
+    """A baseline approval could not prove it matches the reviewed definition."""
+
+
 async def scan(
     target: TargetConfig,
     *,
@@ -38,6 +43,11 @@ async def scan(
     dynamic_config: DynamicConfig | None = None,
 ) -> ScanReport:
     """Run discovery → static candidates → semantic triage → baseline diff."""
+    if update_baseline:
+        raise BaselineApprovalError(
+            "Scanning cannot approve a baseline. Review the definition fingerprint, then run "
+            "'mcpsentinel baseline approve ... --fingerprint sha256:<fingerprint>'."
+        )
     rules = load_rules(rules_path)
     policy = load_policy(policy_path)
     judge = build_judge(judge_kind, judge_model)
@@ -50,6 +60,7 @@ async def scan(
         started_at=utc_now(),
         judge=judge.identity,
         discovery_metadata=discovery_metadata,
+        definition_fingerprint=definition_fingerprint(target, descriptors),
     )
 
     analyzer = StaticAnalyzer(rules)
@@ -77,13 +88,13 @@ async def scan(
     report.findings.extend(comparison.findings)
     if not comparison.prior_exists:
         report.notices.append(
-            "No approved baseline exists. Review this scan, then rerun with "
-            "--approve-baseline to create one."
+            "No approved baseline exists. Review this scan's definition fingerprint, then use "
+            "'mcpsentinel baseline approve ... --fingerprint sha256:<fingerprint>'."
         )
     elif comparison.findings:
         report.notices.append(
-            "The approved baseline was preserved. Review the change before using "
-            "--approve-baseline to accept the new definition."
+            "The approved baseline was preserved. Review the changed definition fingerprint before "
+            "approving it with 'mcpsentinel baseline approve'."
         )
     if dynamic_config is not None:
         dynamic = await run_dynamic_validation(dynamic_config, report.findings)
@@ -93,10 +104,6 @@ async def scan(
         key=lambda finding: (-finding.severity.rank, finding.rule_id, finding.subject_name)
     )
 
-    if update_baseline:
-        store.save_snapshot(target, descriptors)
-        report.baseline_updated = True
-        report.notices.append("The current definition was explicitly approved as the new baseline.")
     fallback_count = getattr(judge, "fallback_count", 0)
     if fallback_count:
         report.notices.append(
@@ -105,6 +112,37 @@ async def scan(
         )
     report.complete()
     return report
+
+
+async def approve_baseline(
+    target: TargetConfig,
+    *,
+    baseline_root: Path,
+    reviewed_fingerprint: str,
+) -> str:
+    """Rediscover and approve only the exact definition a human previously reviewed."""
+    expected = _normalise_fingerprint(reviewed_fingerprint)
+    descriptors, _ = await discover(target)
+    current = definition_fingerprint(target, descriptors)
+    if not compare_digest(current, expected):
+        raise BaselineApprovalError(
+            "Baseline approval refused: the MCP definition changed after the reviewed scan. "
+            f"Reviewed: sha256:{expected}. Current: sha256:{current}."
+        )
+    BaselineStore(baseline_root).save_snapshot(target, descriptors)
+    return current
+
+
+def _normalise_fingerprint(value: str) -> str:
+    fingerprint = value.strip().removeprefix("sha256:")
+    is_sha256 = len(fingerprint) == 64 and all(
+        character in "0123456789abcdef" for character in fingerprint
+    )
+    if not is_sha256:
+        raise BaselineApprovalError(
+            "A definition fingerprint must be a 64-character lowercase SHA-256 value."
+        )
+    return fingerprint
 
 
 def _descriptor_limit_findings(descriptors) -> list[Finding]:
