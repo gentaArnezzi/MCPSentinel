@@ -56,3 +56,38 @@ def test_registry_metadata_is_concrete_and_valid_json() -> None:
     assert "id-token: write" in workflow
     assert "name: pypi" in workflow
     assert "./mcp-publisher publish registry/server.json" in workflow
+
+
+def test_curated_public_metadata_dataset_has_pinned_sources_and_literal_cases() -> None:
+    root = Path(__file__).parents[1]
+    manifest = json.loads(
+        (root / "datasets" / "curated_public_metadata_v2" / "manifest.json").read_text()
+    )
+
+    assert manifest["version"] == 2
+    assert manifest["evaluation_scope"] == "public-metadata-negative-control"
+    assert "case_matrices" not in manifest
+    assert len(manifest["cases"]) == 428
+    assert manifest["labeling"]["reviewer_count"] == 1
+    assert manifest["labeling"]["review_status"] == (
+        "maintainer-reviewed; independent-review-pending"
+    )
+    source_summary = [
+        (source["id"], source["case_count"], source["license"])
+        for source in manifest["sources"]
+    ]
+    assert source_summary == [
+        ("aws", 329, "Apache-2.0"),
+        ("github", 99, "MIT"),
+    ]
+
+    source_counts = {source["id"]: 0 for source in manifest["sources"]}
+    for case in manifest["cases"]:
+        assert case["provenance"] == "source-attributed-public-metadata"
+        assert case["expected_rules"] == []
+        assert case["expected_reported_rules"] == []
+        assert case["source"]["source_id"] in source_counts
+        assert case["source"]["line"] > 0
+        assert len(case["source"]["sha256"]) == 64
+        source_counts[case["source"]["source_id"]] += 1
+    assert source_counts == {"aws": 329, "github": 99}

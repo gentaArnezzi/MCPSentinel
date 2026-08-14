@@ -134,14 +134,14 @@ def build_parser() -> argparse.ArgumentParser:
     dynamic_group.add_argument("--dynamic-confidence", type=_confidence, default=0.80)
 
     benchmark_parser = commands.add_parser(
-        "benchmark", help="Measure static and semantic precision against a controlled dataset."
+        "benchmark", help="Measure labelled scanner behavior against a benchmark dataset."
     )
     benchmark_parser.add_argument(
         "dataset",
         type=Path,
         nargs="?",
         default=Path("datasets/vulnerable_by_design/manifest.json"),
-        help="Controlled JSON dataset (default: datasets/vulnerable_by_design/manifest.json).",
+        help="Labelled JSON dataset (default: datasets/vulnerable_by_design/manifest.json).",
     )
     benchmark_parser.add_argument(
         "--rules", type=Path, help="JSON file with additive custom static rules."

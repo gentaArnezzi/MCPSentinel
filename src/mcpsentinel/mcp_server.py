@@ -23,7 +23,7 @@ mcp = MCPServer(
         "Scan targets only when an operator has configured them in MCPSENTINEL_ALLOWED_HOSTS. "
         "Dynamic execution is intentionally unavailable through this server."
     ),
-    version="0.5.1",
+    version="0.6.0",
 )
 
 

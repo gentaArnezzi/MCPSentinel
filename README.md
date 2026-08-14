@@ -43,7 +43,7 @@ $ mcpsentinel
 |                     Read-only by default                       |
 +----------------------------------------------------------------+
 
-Welcome to MCPSentinel 0.5.1
+Welcome to MCPSentinel 0.6.0
 
 1. Run your first offline scan:
    mcpsentinel scan http://localhost:8000/mcp
@@ -233,7 +233,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.5.1
+- uses: gentaArnezzi/MCPSentinel@v0.6.0
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -248,7 +248,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.5.1
+- uses: gentaArnezzi/MCPSentinel@v0.6.0
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -282,8 +282,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.5.1
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.5.1 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.6.0
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.6.0 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:
@@ -311,7 +311,18 @@ On the bundled 200-case corpus with the offline heuristic and default threshold 
 
 This is a reproducible regression signal—not a claim about public MCP-server accuracy, recall, real-world false-positive rate, or superiority over another scanner. The 165 generated variants are useful coverage controls, not 165 independent real-world observations.
 
-For a real-world benchmark, collect only metadata that you are authorized to assess, preserve the source/version and independent reviewer labels, include benign and adversarial examples, freeze the rule and judge configuration, then compare the same labelled corpus against other scanners. Do not turn an unauthorised third-party scan into a vulnerability claim.
+### Curated public metadata v2
+
+[`datasets/curated_public_metadata_v2`](datasets/curated_public_metadata_v2) adds **428 literal tool descriptors** from source-pinned, permissively licensed MCP implementations: 329 from AWS Labs' Apache-2.0 repository and 99 from GitHub's MIT-licensed MCP server. Every case records repository, full commit SHA, license, source path, line, and source-file SHA-256. The extractor only reads local checkouts and never contacts or invokes an upstream MCP server.
+
+This is a **negative-control** benchmark: ordinary documented tool metadata is expected to produce no unbounded-risk finding. A tool that can perform a scoped cloud deletion or write operation is not automatically a vulnerability, so the corpus does not label source projects as insecure. At the 0.6.0 release configuration, the frozen heuristic produces zero candidates and a false-positive rate of `0.000` across 3,852 descriptor/rule negative pairs. Because it has no labelled positives, precision, recall, and F1 correctly display as `n/a`, not `1.000`.
+
+```bash
+mcpsentinel benchmark datasets/curated_public_metadata_v2/manifest.json \
+  --judge heuristic --format json --output benchmark-v2.json
+```
+
+The v2 corpus has one maintainer review and is explicitly marked `independent-review-pending`. It strengthens public-metadata false-positive evidence; it does not establish public-server recall, real-world vulnerability prevalence, or superiority over another scanner. A next study should add a separately authorized positive corpus and independent labels before making those claims.
 
 ## What MCPSentinel can—and cannot—tell you
 

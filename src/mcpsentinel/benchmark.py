@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from dataclasses import dataclass
 from itertools import product
@@ -28,34 +29,42 @@ class ClassificationMetrics:
     false_negative: int
 
     @property
-    def precision(self) -> float:
+    def precision(self) -> float | None:
         denominator = self.true_positive + self.false_positive
-        return self.true_positive / denominator if denominator else 1.0
+        return self.true_positive / denominator if denominator else None
 
     @property
-    def recall(self) -> float:
+    def recall(self) -> float | None:
         denominator = self.true_positive + self.false_negative
-        return self.true_positive / denominator if denominator else 1.0
+        return self.true_positive / denominator if denominator else None
 
     @property
-    def false_positive_rate(self) -> float:
+    def false_positive_rate(self) -> float | None:
         denominator = self.false_positive + self.true_negative
-        return self.false_positive / denominator if denominator else 0.0
+        return self.false_positive / denominator if denominator else None
 
     @property
-    def f1(self) -> float:
-        denominator = self.precision + self.recall
-        return 2 * self.precision * self.recall / denominator if denominator else 0.0
+    def f1(self) -> float | None:
+        precision = self.precision
+        recall = self.recall
+        if precision is None or recall is None:
+            return None
+        denominator = precision + recall
+        return 2 * precision * recall / denominator if denominator else 0.0
 
 
 @dataclass(frozen=True)
 class BenchmarkReport:
     dataset: str
     dataset_sha256: str
+    dataset_version: int
+    evaluation_scope: str
     scanner_version: str
     judge: str
     semantic_threshold: float
     case_count: int
+    labeled_positive_count: int
+    source_count: int
     rule_count: int
     static_candidate_count: int
     semantic_report_count: int
@@ -73,6 +82,15 @@ class CategoryMetrics:
 
     static: ClassificationMetrics
     semantic: ClassificationMetrics
+
+
+@dataclass(frozen=True)
+class BenchmarkDatasetMetadata:
+    """Validated dataset-level context required to interpret benchmark metrics."""
+
+    version: int
+    evaluation_scope: str
+    source_count: int
 
 
 def _rule_ids(value: Any, *, field: str, case_id: str) -> set[str]:
@@ -151,6 +169,114 @@ def _descriptors_and_truth(
         expected_reported[case_id] = reported_rules
         provenance_by_case[case_id] = provenance
     return descriptors, expected_reported, provenance_by_case
+
+
+def _dataset_metadata(manifest: dict[str, Any]) -> BenchmarkDatasetMetadata:
+    version = manifest.get("version", 1)
+    if not isinstance(version, int) or version < 1:
+        raise BenchmarkConfigurationError("Benchmark dataset version must be a positive integer.")
+    if version == 1:
+        return BenchmarkDatasetMetadata(
+            version=version,
+            evaluation_scope="controlled-synthetic-regression",
+            source_count=0,
+        )
+    if version != 2:
+        raise BenchmarkConfigurationError(f"Unsupported benchmark dataset version {version}.")
+
+    evaluation_scope = manifest.get("evaluation_scope")
+    if evaluation_scope != "public-metadata-negative-control":
+        raise BenchmarkConfigurationError(
+            "Version 2 benchmark datasets require the public-metadata-negative-control scope."
+        )
+    if manifest.get("case_matrices", []):
+        raise BenchmarkConfigurationError(
+            "Version 2 public-metadata datasets must contain literal source-attributed cases, "
+            "not generated case matrices."
+        )
+    labeling = manifest.get("labeling")
+    if not isinstance(labeling, dict) or not all(
+        isinstance(labeling.get(field), str) and labeling[field]
+        for field in ("rubric", "review_status")
+    ):
+        raise BenchmarkConfigurationError(
+            "Version 2 benchmark datasets require non-empty labeling rubric and review status."
+        )
+    if not isinstance(labeling.get("reviewer_count"), int) or labeling["reviewer_count"] < 1:
+        raise BenchmarkConfigurationError(
+            "Version 2 benchmark datasets require a positive labeling reviewer_count."
+        )
+
+    sources = manifest.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise BenchmarkConfigurationError("Version 2 benchmark datasets require source records.")
+    source_ids: set[str] = set()
+    for source in sources:
+        if not isinstance(source, dict):
+            raise BenchmarkConfigurationError("Every Version 2 source record must be an object.")
+        source_id = source.get("id")
+        if not isinstance(source_id, str) or not source_id or source_id in source_ids:
+            raise BenchmarkConfigurationError(
+                "Version 2 source IDs must be unique non-empty strings."
+            )
+        source_ids.add(source_id)
+        if not all(
+            isinstance(source.get(field), str) and source[field]
+            for field in ("repository", "license", "license_path", "extraction")
+        ):
+            raise BenchmarkConfigurationError(
+                f"Version 2 source {source_id!r} has incomplete provenance metadata."
+            )
+        commit = source.get("commit")
+        if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise BenchmarkConfigurationError(
+                f"Version 2 source {source_id!r} must pin a full Git commit SHA."
+            )
+        if not isinstance(source.get("case_count"), int) or source["case_count"] < 1:
+            raise BenchmarkConfigurationError(
+                f"Version 2 source {source_id!r} needs a positive case_count."
+            )
+
+    cases = manifest.get("cases", [])
+    if not isinstance(cases, list) or not cases:
+        raise BenchmarkConfigurationError("Version 2 benchmark datasets require literal cases.")
+    source_case_counts = {source["id"]: 0 for source in sources}
+    for case in cases:
+        if not isinstance(case, dict):
+            raise BenchmarkConfigurationError("Every Version 2 benchmark case must be an object.")
+        if case.get("provenance") != "source-attributed-public-metadata":
+            raise BenchmarkConfigurationError(
+                "Version 2 cases must use source-attributed-public-metadata provenance."
+            )
+        if case.get("expected_rules") or case.get("expected_reported_rules"):
+            raise BenchmarkConfigurationError(
+                "Public-metadata negative-control cases must not label ordinary tool metadata "
+                "as an unbounded-risk finding."
+            )
+        source = case.get("source")
+        if not isinstance(source, dict) or source.get("source_id") not in source_case_counts:
+            raise BenchmarkConfigurationError(
+                "Version 2 cases must name a declared source record."
+            )
+        if not isinstance(source.get("path"), str) or not source["path"]:
+            raise BenchmarkConfigurationError("Version 2 cases require a non-empty source path.")
+        if not isinstance(source.get("line"), int) or source["line"] < 1:
+            raise BenchmarkConfigurationError("Version 2 cases require a positive source line.")
+        digest = source.get("sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise BenchmarkConfigurationError("Version 2 cases require a source-file SHA-256.")
+        source_case_counts[source["source_id"]] += 1
+    for source in sources:
+        if source_case_counts[source["id"]] != source["case_count"]:
+            raise BenchmarkConfigurationError(
+                f"Version 2 source {source['id']!r} declares {source['case_count']} cases, "
+                f"but {source_case_counts[source['id']]} were found."
+            )
+    return BenchmarkDatasetMetadata(
+        version=version,
+        evaluation_scope=evaluation_scope,
+        source_count=len(sources),
+    )
 
 
 def _expanded_cases(manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -289,6 +415,7 @@ async def run_benchmark(
     if not 0 <= semantic_threshold <= 1:
         raise BenchmarkConfigurationError("Semantic threshold must be from 0 to 1.")
 
+    metadata = _dataset_metadata(manifest)
     descriptors, expected_reported, provenance_by_case = _descriptors_and_truth(manifest)
     rules = load_rules(rules_path)
     analyzer = StaticAnalyzer(rules)
@@ -317,10 +444,14 @@ async def run_benchmark(
     return BenchmarkReport(
         dataset=str(dataset_path),
         dataset_sha256=hashlib.sha256(dataset_bytes).hexdigest(),
+        dataset_version=metadata.version,
+        evaluation_scope=metadata.evaluation_scope,
         scanner_version=__version__,
         judge=judge.identity,
         semantic_threshold=semantic_threshold,
         case_count=len(descriptors),
+        labeled_positive_count=sum(len(rule_ids) for rule_ids in expected_reported.values()),
+        source_count=metadata.source_count,
         rule_count=len(rules),
         static_candidate_count=len(static_predictions),
         semantic_report_count=len(semantic_predictions),
@@ -357,14 +488,36 @@ async def run_benchmark(
 
 
 def benchmark_json(report: BenchmarkReport) -> str:
-    return json.dumps(to_primitive(report), indent=2, sort_keys=True) + "\n"
+    def metrics_payload(metrics: ClassificationMetrics) -> dict[str, int | float | None]:
+        return {
+            **to_primitive(metrics),
+            "precision": metrics.precision,
+            "recall": metrics.recall,
+            "f1": metrics.f1,
+            "false_positive_rate": metrics.false_positive_rate,
+        }
+
+    payload = to_primitive(report)
+    payload["static"] = metrics_payload(report.static)
+    payload["semantic"] = metrics_payload(report.semantic)
+    payload["per_category"] = {
+        category: {
+            "static": metrics_payload(metrics.static),
+            "semantic": metrics_payload(metrics.semantic),
+        }
+        for category, metrics in report.per_category.items()
+    }
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
 def benchmark_text(report: BenchmarkReport) -> str:
     def summary(name: str, metrics: ClassificationMetrics) -> str:
+        def value(metric: float | None) -> str:
+            return f"{metric:.3f}" if metric is not None else "n/a"
+
         return (
-            f"{name}: precision={metrics.precision:.3f} recall={metrics.recall:.3f} "
-            f"f1={metrics.f1:.3f} false_positive_rate={metrics.false_positive_rate:.3f} "
+            f"{name}: precision={value(metrics.precision)} recall={value(metrics.recall)} "
+            f"f1={value(metrics.f1)} false_positive_rate={value(metrics.false_positive_rate)} "
             f"(TP={metrics.true_positive}, FP={metrics.false_positive}, "
             f"TN={metrics.true_negative}, FN={metrics.false_negative})"
         )
@@ -378,9 +531,14 @@ def benchmark_text(report: BenchmarkReport) -> str:
         (
             f"Benchmark dataset: {report.dataset}",
             f"Dataset SHA-256: {report.dataset_sha256}",
+            f"Dataset version: {report.dataset_version}; scope: {report.evaluation_scope}",
             f"Scanner: MCPSentinel {report.scanner_version}",
             f"Judge: {report.judge} (threshold {report.semantic_threshold:.2f})",
-            f"Cases: {report.case_count}; rules: {report.rule_count}",
+            (
+                f"Cases: {report.case_count}; rules: {report.rule_count}; "
+                f"labelled positive pairs: {report.labeled_positive_count}; "
+                f"source records: {report.source_count}"
+            ),
             summary("Static candidates", report.static),
             summary("Semantic findings", report.semantic),
             "Provenance: "

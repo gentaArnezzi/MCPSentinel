@@ -10,6 +10,13 @@ runnable destructive payload. Every case declares one provenance value:
 - `synthetic-template` — a deterministic expansion of a documented matrix in
   `manifest.json`.
 
+`curated_public_metadata_v2` is separately versioned and uses only literal,
+source-attributed public metadata samples. It carries the source repository,
+full Git commit, license, source path, line, and source-file digest for every
+case. Its public-metadata-negative-control rubric labels ordinary documented
+tools with no unbounded-risk rule. This does **not** say that a source tool is
+safe in every deployment or that a source project has been security audited.
+
 The benchmark prints these counts. A case matrix must declare `expected_count`;
 the runner rejects it when the dimensions expand to a different number of
 cases. This makes it possible to audit exactly what produced a metric from a
@@ -46,4 +53,4 @@ Record any metric change in the release notes or pull request. To make a
 real-world claim, use a separately versioned, authorized corpus with source
 versions and independent reviewer labels, then run each scanner with frozen
 configuration against that same corpus. Do not infer public-server accuracy
-from this bundled synthetic set.
+from either the bundled synthetic set or the single-review v2 negative control.
