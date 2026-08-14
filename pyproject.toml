@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.27.0"]
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -35,7 +35,7 @@ Repository = "https://github.com/gentaArnezzi/MCPSentinel"
 Issues = "https://github.com/gentaArnezzi/MCPSentinel/issues"
 
 [project.optional-dependencies]
-build = ["hatchling==1.27.0"]
+build = ["hatchling==1.32.0"]
 dev = [
   "build>=1.2",
   "pip-audit>=2.9",
