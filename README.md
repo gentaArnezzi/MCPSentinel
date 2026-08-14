@@ -43,7 +43,7 @@ $ mcpsentinel
 |                     Read-only by default                       |
 +----------------------------------------------------------------+
 
-Welcome to MCPSentinel 0.3.0
+Welcome to MCPSentinel 0.4.0
 
 1. Run your first offline scan:
    mcpsentinel scan http://localhost:8000/mcp
@@ -231,7 +231,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.3.0
+- uses: gentaArnezzi/MCPSentinel@v0.4.0
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -246,7 +246,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.3.0
+- uses: gentaArnezzi/MCPSentinel@v0.4.0
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -280,8 +280,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.3.0
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.3.0 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.4.0
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.4.0 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:
@@ -295,7 +295,7 @@ The image intentionally has no Docker socket and cannot run the dynamic layer. R
 
 ## Dataset
 
-[datasets/vulnerable_by_design](datasets/vulnerable_by_design) holds controlled descriptor-level ground truth for regression tests across every default static rule. It includes safe hard negatives, Unicode/zero-width evasion, metadata/schema variants, and intentionally uncovered controls; it contains no live third-party targets or runnable destructive payloads.
+[datasets/vulnerable_by_design](datasets/vulnerable_by_design) holds controlled descriptor-level ground truth for regression tests across every default static rule. It expands deterministically to **200 synthetic descriptors**: 35 hand-curated controls and 165 template-generated variants. It includes safe hard negatives, Unicode/zero-width evasion, non-English controls, metadata/schema variants, and intentionally uncovered controls; it contains no live third-party targets or runnable destructive payloads. [The labelling protocol](datasets/LABELING.md) documents the provenance and review contract.
 
 Run a reproducible accuracy and timing measurement with the offline judge:
 
@@ -303,9 +303,11 @@ Run a reproducible accuracy and timing measurement with the offline judge:
 mcpsentinel benchmark datasets/vulnerable_by_design/manifest.json --format json --output benchmark.json
 ```
 
-The benchmark measures both raw static candidates and semantic findings against the dataset's expected reportable rules. It reports precision, recall, false-positive rate, F1, confusion-matrix counts, stage timings, and a separate breakdown for every attack category. The bounded-fetch control intentionally counts as a static false positive but a semantic true negative, so regressions in noise suppression are visible in CI or release review.
+The benchmark measures both raw static candidates and semantic findings against the dataset's expected reportable rules. It reports precision, recall, false-positive rate, F1, confusion-matrix counts, stage timings, per-category breakdowns, and the count for each provenance type. Its JSON and terminal reports include the source-manifest SHA-256 and scanner version for traceability. Ten bounded-fetch controls intentionally count as static false positives but semantic true negatives, so regressions in noise suppression are visible in CI or release review.
 
-Current evidence is deliberately narrow: the bundled set has 35 synthetic descriptors and 9 built-in rules. With the offline heuristic it currently reports static precision `0.966`, recall `0.933`, and semantic precision `1.000`, recall `0.933` on that controlled set. The two deliberate misses make current language/field coverage visible; semantic triage suppresses one bounded-network false positive. This is a regression signal—not a claim about public MCP server accuracy, recall, or superiority over another scanner.
+On the bundled 200-case corpus with the offline heuristic and default threshold (`0.70`), static candidates measure precision `0.932`, recall `0.965`, F1 `0.948`, and false-positive rate `0.006` (`TP=136`, `FP=10`, `TN=1649`, `FN=5`). Semantic triage measures precision `1.000`, recall `0.965`, F1 `0.982`, and false-positive rate `0.000` (`TP=136`, `FP=0`, `TN=1659`, `FN=5`). The five deliberate misses—four non-English prompt-injection controls and one metadata-placement destructive-operation control—remain visible rather than being excluded. The SSRF category shows why both stages are reported: static precision is `0.545` while semantic precision is `1.000` on its controlled cases.
+
+This is a reproducible regression signal—not a claim about public MCP-server accuracy, recall, real-world false-positive rate, or superiority over another scanner. The 165 generated variants are useful coverage controls, not 165 independent real-world observations.
 
 For a real-world benchmark, collect only metadata that you are authorized to assess, preserve the source/version and independent reviewer labels, include benign and adversarial examples, freeze the rule and judge configuration, then compare the same labelled corpus against other scanners. Do not turn an unauthorised third-party scan into a vulnerability claim.
 

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass
+from itertools import product
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .models import DescriptorKind, ToolDescriptor, to_primitive
 from .rules import StaticAnalyzer, load_rules
 from .semantic import SemanticJudge
@@ -48,6 +51,8 @@ class ClassificationMetrics:
 @dataclass(frozen=True)
 class BenchmarkReport:
     dataset: str
+    dataset_sha256: str
+    scanner_version: str
     judge: str
     semantic_threshold: float
     case_count: int
@@ -59,6 +64,7 @@ class BenchmarkReport:
     static: ClassificationMetrics
     semantic: ClassificationMetrics
     per_category: dict[str, CategoryMetrics]
+    provenance_counts: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -79,13 +85,12 @@ def _rule_ids(value: Any, *, field: str, case_id: str) -> set[str]:
 
 def _descriptors_and_truth(
     manifest: dict[str, Any],
-) -> tuple[list[ToolDescriptor], dict[str, set[str]]]:
-    cases = manifest.get("cases")
-    if not isinstance(cases, list) or not cases:
-        raise BenchmarkConfigurationError("Benchmark manifest needs a non-empty 'cases' list.")
+) -> tuple[list[ToolDescriptor], dict[str, set[str]], dict[str, str]]:
+    cases = _expanded_cases(manifest)
 
     descriptors: list[ToolDescriptor] = []
     expected_reported: dict[str, set[str]] = {}
+    provenance_by_case: dict[str, str] = {}
     seen_ids: set[str] = set()
     for case in cases:
         if not isinstance(case, dict):
@@ -102,6 +107,11 @@ def _descriptors_and_truth(
                 f"Benchmark manifest has duplicate case id {case_id!r}."
             )
         seen_ids.add(case_id)
+        provenance = case.get("provenance", "hand-curated-synthetic")
+        if not isinstance(provenance, str) or not provenance:
+            raise BenchmarkConfigurationError(
+                f"Case {case_id!r} needs a non-empty provenance string."
+            )
 
         static_rules = _rule_ids(
             case.get("expected_rules"), field="expected_rules", case_id=case_id
@@ -139,7 +149,100 @@ def _descriptors_and_truth(
             )
         )
         expected_reported[case_id] = reported_rules
-    return descriptors, expected_reported
+        provenance_by_case[case_id] = provenance
+    return descriptors, expected_reported, provenance_by_case
+
+
+def _expanded_cases(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Materialize hand-curated cases and transparent deterministic case matrices."""
+    cases = manifest.get("cases", [])
+    if not isinstance(cases, list):
+        raise BenchmarkConfigurationError("Benchmark 'cases' must be a list.")
+    expanded: list[dict[str, Any]] = list(cases)
+    matrices = manifest.get("case_matrices", [])
+    if not isinstance(matrices, list):
+        raise BenchmarkConfigurationError("Benchmark 'case_matrices' must be a list.")
+    for matrix in matrices:
+        if not isinstance(matrix, dict):
+            raise BenchmarkConfigurationError("Every benchmark case matrix must be an object.")
+        prefix = matrix.get("id_prefix")
+        name_template = matrix.get("name_template")
+        description_template = matrix.get("description_template")
+        dimensions = matrix.get("dimensions", {})
+        if not all(isinstance(value, str) and value for value in (prefix, name_template)):
+            raise BenchmarkConfigurationError(
+                "Every benchmark case matrix needs non-empty id_prefix and name_template."
+            )
+        if not isinstance(description_template, str):
+            raise BenchmarkConfigurationError(
+                f"Benchmark matrix {prefix!r} needs a string description_template."
+            )
+        if not isinstance(dimensions, dict) or not all(
+            isinstance(key, str)
+            and key
+            and isinstance(values, list)
+            and values
+            and all(isinstance(value, (str, int, float)) for value in values)
+            for key, values in dimensions.items()
+        ):
+            raise BenchmarkConfigurationError(
+                f"Benchmark matrix {prefix!r} needs non-empty list dimensions."
+            )
+        dimension_names = tuple(sorted(dimensions))
+        combinations = tuple(product(*(dimensions[name] for name in dimension_names)))
+        expected_count = matrix.get("expected_count", len(combinations))
+        if expected_count != len(combinations):
+            raise BenchmarkConfigurationError(
+                f"Benchmark matrix {prefix!r} expected {expected_count} cases, "
+                f"but its dimensions generate {len(combinations)}."
+            )
+        for index, combination in enumerate(combinations, start=1):
+            values = {
+                "id_prefix": prefix,
+                "index": index,
+                **dict(zip(dimension_names, combination, strict=True)),
+            }
+            case = {
+                key: _render_template(value, values)
+                for key, value in matrix.items()
+                if key
+                not in {
+                    "id_prefix",
+                    "name_template",
+                    "description_template",
+                    "dimensions",
+                    "expected_count",
+                }
+            }
+            case.update(
+                {
+                    "id": f"{prefix}-{index:03d}",
+                    "name": _render_template(name_template, values),
+                    "description": _render_template(description_template, values),
+                    "provenance": matrix.get("provenance", "synthetic-template"),
+                }
+            )
+            expanded.append(case)
+    if not expanded:
+        raise BenchmarkConfigurationError(
+            "Benchmark manifest needs at least one case or case matrix."
+        )
+    return expanded
+
+
+def _render_template(value: Any, variables: dict[str, Any]) -> Any:
+    if isinstance(value, str):
+        try:
+            return value.format(**variables)
+        except KeyError as error:
+            raise BenchmarkConfigurationError(
+                f"Benchmark template refers to an unknown variable {error.args[0]!r}."
+            ) from error
+    if isinstance(value, list):
+        return [_render_template(item, variables) for item in value]
+    if isinstance(value, dict):
+        return {key: _render_template(item, variables) for key, item in value.items()}
+    return value
 
 
 def _metrics(
@@ -171,7 +274,8 @@ async def run_benchmark(
 ) -> BenchmarkReport:
     """Measure raw static candidates and semantic findings against controlled ground truth."""
     try:
-        manifest = json.loads(dataset_path.read_text(encoding="utf-8"))
+        dataset_bytes = dataset_path.read_bytes()
+        manifest = json.loads(dataset_bytes)
     except OSError as error:
         raise BenchmarkConfigurationError(
             f"Could not read benchmark dataset {dataset_path}: {error}"
@@ -185,7 +289,7 @@ async def run_benchmark(
     if not 0 <= semantic_threshold <= 1:
         raise BenchmarkConfigurationError("Semantic threshold must be from 0 to 1.")
 
-    descriptors, expected_reported = _descriptors_and_truth(manifest)
+    descriptors, expected_reported, provenance_by_case = _descriptors_and_truth(manifest)
     rules = load_rules(rules_path)
     analyzer = StaticAnalyzer(rules)
     rule_ids = {rule.id for rule in rules}
@@ -212,6 +316,8 @@ async def run_benchmark(
 
     return BenchmarkReport(
         dataset=str(dataset_path),
+        dataset_sha256=hashlib.sha256(dataset_bytes).hexdigest(),
+        scanner_version=__version__,
         judge=judge.identity,
         semantic_threshold=semantic_threshold,
         case_count=len(descriptors),
@@ -243,6 +349,10 @@ async def run_benchmark(
             )
             for category, category_rules in sorted(category_rule_ids.items())
         },
+        provenance_counts={
+            provenance: sum(item == provenance for item in provenance_by_case.values())
+            for provenance in sorted(set(provenance_by_case.values()))
+        },
     )
 
 
@@ -267,10 +377,17 @@ def benchmark_text(report: BenchmarkReport) -> str:
     return "\n".join(
         (
             f"Benchmark dataset: {report.dataset}",
+            f"Dataset SHA-256: {report.dataset_sha256}",
+            f"Scanner: MCPSentinel {report.scanner_version}",
             f"Judge: {report.judge} (threshold {report.semantic_threshold:.2f})",
             f"Cases: {report.case_count}; rules: {report.rule_count}",
             summary("Static candidates", report.static),
             summary("Semantic findings", report.semantic),
+            "Provenance: "
+            + ", ".join(
+                f"{provenance}={count}"
+                for provenance, count in report.provenance_counts.items()
+            ),
             "Per category:",
             *categories,
             (

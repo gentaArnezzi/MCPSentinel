@@ -4,6 +4,7 @@ import json
 import tomllib
 from pathlib import Path
 
+from mcpsentinel.benchmark import _expanded_cases
 from mcpsentinel.models import DescriptorKind, ToolDescriptor
 from mcpsentinel.rules import StaticAnalyzer, load_rules
 from mcpsentinel.semantic import HeuristicJudge
@@ -15,7 +16,10 @@ async def test_vulnerable_by_design_dataset_matches_static_and_semantic_ground_t
     analyzer = StaticAnalyzer(load_rules())
     judge = HeuristicJudge()
 
-    for case in manifest["cases"]:
+    cases = _expanded_cases(manifest)
+    assert len(cases) == 200
+
+    for case in cases:
         descriptor = ToolDescriptor(
             kind=DescriptorKind(case.get("kind", DescriptorKind.TOOL.value)),
             name=case["name"],

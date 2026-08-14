@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from mcpsentinel.benchmark import benchmark_json, benchmark_text, run_benchmark
+import pytest
+
+from mcpsentinel.benchmark import (
+    BenchmarkConfigurationError,
+    benchmark_json,
+    benchmark_text,
+    run_benchmark,
+)
 from mcpsentinel.semantic import HeuristicJudge
 
 
@@ -11,7 +19,7 @@ async def test_controlled_dataset_measures_semantic_precision_improvement() -> N
 
     report = await run_benchmark(dataset, HeuristicJudge(), semantic_threshold=0.70)
 
-    assert report.case_count >= 10
+    assert report.case_count == 200
     assert report.static.true_positive > 0
     assert report.static.false_positive > 0
     assert report.semantic.true_positive > 0
@@ -19,8 +27,39 @@ async def test_controlled_dataset_measures_semantic_precision_improvement() -> N
     assert report.semantic.precision > report.static.precision
     assert "prompt_injection" in report.per_category
     assert "ssrf" in report.per_category
+    assert report.provenance_counts == {
+        "hand-curated-synthetic": 35,
+        "synthetic-template": 165,
+    }
+    assert len(report.dataset_sha256) == 64
+    assert report.scanner_version
     assert report.static_duration_ms >= 0
     assert report.semantic_duration_ms >= 0
     assert '"semantic"' in benchmark_json(report)
     assert "Semantic findings: precision=1.000" in benchmark_text(report)
     assert "Per category:" in benchmark_text(report)
+    assert "Provenance:" in benchmark_text(report)
+    assert "Dataset SHA-256:" in benchmark_text(report)
+
+
+async def test_case_matrix_count_is_validated(tmp_path: Path) -> None:
+    dataset = tmp_path / "invalid-matrix.json"
+    dataset.write_text(
+        json.dumps(
+            {
+                "case_matrices": [
+                    {
+                        "id_prefix": "invalid",
+                        "name_template": "case_{index}",
+                        "description_template": "description",
+                        "dimensions": {"variant": ["only-one"]},
+                        "expected_count": 2,
+                        "expected_rules": [],
+                    }
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(BenchmarkConfigurationError, match="expected 2 cases"):
+        await run_benchmark(dataset, HeuristicJudge(), semantic_threshold=0.70)
