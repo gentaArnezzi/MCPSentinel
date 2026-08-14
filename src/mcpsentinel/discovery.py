@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
+import json
 import os
+import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -17,7 +20,7 @@ from mcp import types as mcp_types
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
-from .models import DescriptorKind, TargetConfig, ToolDescriptor
+from .models import DescriptorKind, DescriptorTruncation, TargetConfig, ToolDescriptor
 
 DISCOVERY_TIMEOUT_SECONDS = 30.0
 HTTP_CONNECT_TIMEOUT_SECONDS = 5.0
@@ -27,6 +30,24 @@ HTTP_POOL_TIMEOUT_SECONDS = 5.0
 DNS_LOOKUP_TIMEOUT_SECONDS = 5.0
 MAX_DESCRIPTOR_PAGES = 100
 MAX_DESCRIPTORS_PER_CAPABILITY = 1_000
+MAX_DESCRIPTOR_NAME_BYTES = 4 * 1024
+MAX_DESCRIPTOR_DESCRIPTION_BYTES = 64 * 1024
+MAX_DESCRIPTOR_SCHEMA_BYTES = 192 * 1024
+MAX_DESCRIPTOR_METADATA_BYTES = 192 * 1024
+MAX_DESCRIPTOR_TOTAL_BYTES = 512 * 1024
+
+# The stdio server is an untrusted child process. It gets only an execution
+# path and locale by default; credentials and home-directory lookup variables
+# stay with the scanner unless the operator explicitly opts in.
+_SAFE_STDIO_ENVIRONMENT_KEYS = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+)
 
 
 class DiscoveryError(RuntimeError):
@@ -132,9 +153,111 @@ def _descriptor(kind: DescriptorKind, item: Any) -> ToolDescriptor:
             key: value.pop(key) for key in list(value) if key in {"uri", "uriTemplate", "mimeType"}
         }
 
+    return _bounded_descriptor(kind, name, description, schema, value)
+
+
+def _bounded_descriptor(
+    kind: DescriptorKind,
+    name: str,
+    description: str,
+    schema: dict[str, Any],
+    metadata: dict[str, Any],
+) -> ToolDescriptor:
+    """Keep oversized hostile metadata out of reports, rules, and semantic prompts.
+
+    The MCP SDK must decode a protocol response before we see it, but this
+    boundary limits all downstream storage and processing. A truncation record
+    preserves a digest and byte counts, and the scan emits MCP-N001 rather than
+    silently treating incomplete metadata as an ordinary descriptor.
+    """
+    original = {
+        "kind": kind.value,
+        "name": name,
+        "description": description,
+        "schema": schema,
+        "metadata": metadata,
+    }
+    original_bytes = _json_bytes(original)
+    exceeded: list[str] = []
+
+    safe_name = _truncate_text(name, MAX_DESCRIPTOR_NAME_BYTES)
+    if safe_name != name:
+        exceeded.append("name")
+    safe_description = _truncate_text(description, MAX_DESCRIPTOR_DESCRIPTION_BYTES)
+    if safe_description != description:
+        exceeded.append("description")
+
+    safe_schema = schema
+    if len(_json_bytes(schema)) > MAX_DESCRIPTOR_SCHEMA_BYTES:
+        exceeded.append("schema")
+        safe_schema = _truncation_marker(schema)
+    safe_metadata = metadata
+    if len(_json_bytes(metadata)) > MAX_DESCRIPTOR_METADATA_BYTES:
+        exceeded.append("metadata")
+        safe_metadata = _truncation_marker(metadata)
+
+    bounded = {
+        "kind": kind.value,
+        "name": safe_name,
+        "description": safe_description,
+        "schema": safe_schema,
+        "metadata": safe_metadata,
+    }
+    if len(original_bytes) > MAX_DESCRIPTOR_TOTAL_BYTES and not exceeded:
+        # Component budgets normally make this unreachable. Keep an explicit
+        # total guard so a future field addition cannot defeat the envelope.
+        exceeded.append("total")
+        safe_metadata = _truncation_marker(metadata)
+        bounded["metadata"] = safe_metadata
+
+    truncation = None
+    if exceeded:
+        analyzed_bytes = len(_json_bytes(bounded))
+        truncation = DescriptorTruncation(
+            exceeded_fields=tuple(exceeded),
+            original_bytes=len(original_bytes),
+            analyzed_bytes=analyzed_bytes,
+            original_sha256=hashlib.sha256(original_bytes).hexdigest(),
+        )
     return ToolDescriptor(
-        kind=kind, name=name, description=description, schema=schema, metadata=value
+        kind=kind,
+        name=safe_name,
+        description=safe_description,
+        schema=safe_schema,
+        metadata=safe_metadata,
+        truncation=truncation,
     )
+
+
+def _json_bytes(value: Any) -> bytes:
+    serialized = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return serialized.encode("utf-8")
+
+
+def _truncate_text(value: str, max_bytes: int) -> str:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    marker = "\n[TRUNCATED_BY_MCPSENTINEL]\n"
+    marker_bytes = marker.encode("utf-8")
+    remaining = max(2, max_bytes - len(marker_bytes))
+    head_bytes = remaining * 2 // 3
+    tail_bytes = remaining - head_bytes
+    return (
+        encoded[:head_bytes].decode("utf-8", errors="ignore")
+        + marker
+        + encoded[-tail_bytes:].decode("utf-8", errors="ignore")
+    )
+
+
+def _truncation_marker(value: Any) -> dict[str, object]:
+    encoded = _json_bytes(value)
+    return {
+        "_mcpsentinel_truncated": {
+            "original_bytes": len(encoded),
+            "original_sha256": hashlib.sha256(encoded).hexdigest(),
+        }
+    }
 
 
 @asynccontextmanager
@@ -156,9 +279,7 @@ async def _session_for(target: TargetConfig) -> AsyncIterator[ClientSession]:
     if target.transport != "stdio" or not target.command:
         raise DiscoveryError(f"Unsupported target transport: {target.transport!r}")
 
-    # Preserve PATH and other process requirements while allowing explicit overrides.
-    environment = dict(os.environ)
-    environment.update(target.environment)
+    environment = _stdio_environment(target)
     parameters = StdioServerParameters(
         command=target.command,
         args=list(target.arguments),
@@ -167,6 +288,20 @@ async def _session_for(target: TargetConfig) -> AsyncIterator[ClientSession]:
     async with stdio_client(parameters) as (read, write):
         async with ClientSession(read, write) as session:
             yield session
+
+
+def _stdio_environment(target: TargetConfig) -> dict[str, str]:
+    """Build the child environment without forwarding ambient credentials by default."""
+    environment = dict(os.environ) if target.inherit_environment else {
+        key: os.environ[key] for key in _SAFE_STDIO_ENVIRONMENT_KEYS if key in os.environ
+    }
+    if not target.inherit_environment:
+        # The MCP SDK adds HOME from its safe-default list unless the caller
+        # provides a value. Use a neutral temporary location instead of the
+        # scanner user's home, where common credential files are discovered.
+        environment["HOME"] = tempfile.gettempdir()
+    environment.update(target.environment)
+    return environment
 
 
 def _http_client(

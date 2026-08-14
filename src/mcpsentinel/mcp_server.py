@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from mcp import types
 from mcp.server import MCPServer
 
+from . import __version__
 from .models import TargetConfig, to_primitive
 from .service import scan
 
@@ -23,7 +24,7 @@ mcp = MCPServer(
         "Scan targets only when an operator has configured them in MCPSENTINEL_ALLOWED_HOSTS. "
         "Dynamic execution is intentionally unavailable through this server."
     ),
-    version="0.7.0",
+    version=__version__,
 )
 
 

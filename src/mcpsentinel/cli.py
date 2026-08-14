@@ -16,7 +16,7 @@ from .benchmark import BenchmarkConfigurationError, benchmark_json, benchmark_te
 from .discovery import DiscoveryError
 from .dynamic import DynamicConfig, DynamicInvocation, DynamicValidationError
 from .models import Severity, TargetConfig
-from .reporting import write_report
+from .reporting import terminal_report, write_report
 from .semantic import build_judge
 from .service import reaches_fail_threshold, scan
 
@@ -67,7 +67,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="Environment override for stdio.",
+        help="Explicit environment value for the stdio child; values are redacted from reports.",
+    )
+    scan_parser.add_argument(
+        "--inherit-env",
+        action="store_true",
+        help=(
+            "UNSAFE: forward the full scanner environment to the stdio child. "
+            "Disabled by default because it can expose credentials."
+        ),
     )
     scan_parser.add_argument(
         "--rules", type=Path, help="JSON file with additive custom static rules."
@@ -261,6 +269,7 @@ def _target_from_args(args: argparse.Namespace) -> TargetConfig:
         command=command,
         arguments=tuple(command_args),
         environment=environment,
+        inherit_environment=args.inherit_env,
     )
 
 
@@ -279,8 +288,13 @@ async def _run_scan(args: argparse.Namespace) -> int:
         semantic_threshold=args.semantic_threshold,
         dynamic_config=_dynamic_from_args(args),
     )
-    rendered = write_report(report, args.format, args.output)
-    print(rendered, end="")
+    if args.format == "text" and sys.stdout.isatty():
+        if args.output is not None:
+            write_report(report, args.format, args.output)
+        terminal_report(report)
+    else:
+        rendered = write_report(report, args.format, args.output)
+        print(rendered, end="")
     threshold = None if args.fail_on == "none" else Severity(args.fail_on)
     return 1 if reaches_fail_threshold(report, threshold) else 0
 

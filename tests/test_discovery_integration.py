@@ -13,7 +13,7 @@ import pytest
 
 from mcpsentinel import discovery
 from mcpsentinel.discovery import DiscoveryError
-from mcpsentinel.models import TargetConfig
+from mcpsentinel.models import DescriptorKind, TargetConfig
 from mcpsentinel.service import scan
 
 
@@ -40,6 +40,78 @@ async def test_stdio_discovery_scans_metadata_without_invoking_tool(tmp_path: Pa
     assert [item.name for item in report.descriptors] == ["system_export", "background_worker"]
     assert report.discovery_metadata["server"]["name"] == "mcpsentinel-test-server"
     assert [finding.rule_id for finding in report.findings] == ["MCP002", "MCP001", "MCP004"]
+
+
+async def test_stdio_discovery_does_not_forward_ambient_secret_to_child(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MCPSENTINEL_TEST_AMBIENT_SECRET", "must-not-reach-child")
+    fixture = Path(__file__).with_name("fixture_stdio_environment_server.py")
+    target = TargetConfig(
+        transport="stdio",
+        identity="environment-fixture",
+        command=sys.executable,
+        arguments=(str(fixture),),
+    )
+
+    report = await scan(
+        target,
+        rules_path=None,
+        policy_path=None,
+        baseline_root=tmp_path,
+        update_baseline=False,
+        judge_kind="heuristic",
+        judge_model="unused",
+        semantic_threshold=0.70,
+    )
+
+    assert report.discovery_metadata["server"]["name"] == "env-secret-absent"
+
+
+def test_stdio_environment_is_default_deny_with_explicit_overrides(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "ambient-secret")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "ambient-cloud-secret")
+    monkeypatch.setenv("PATH", "/controlled/bin")
+    target = TargetConfig(
+        transport="stdio",
+        identity="fixture",
+        command="fixture",
+        environment={"FIXTURE_MODE": "safe"},
+    )
+
+    environment = discovery._stdio_environment(target)
+
+    assert environment["PATH"] == "/controlled/bin"
+    assert environment["HOME"] != os.environ.get("HOME")
+    assert environment["FIXTURE_MODE"] == "safe"
+    assert "OPENAI_API_KEY" not in environment
+    assert "AWS_SECRET_ACCESS_KEY" not in environment
+
+
+def test_stdio_environment_inheritance_is_an_explicit_opt_in(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "ambient-secret")
+    target = TargetConfig(
+        transport="stdio", identity="fixture", command="fixture", inherit_environment=True
+    )
+
+    assert discovery._stdio_environment(target)["OPENAI_API_KEY"] == "ambient-secret"
+
+
+def test_oversized_descriptor_is_bounded_and_marked_for_review() -> None:
+    descriptor = discovery._descriptor(
+        DescriptorKind.TOOL,
+        {
+            "name": "oversized_tool",
+            "description": "A" * (discovery.MAX_DESCRIPTOR_DESCRIPTION_BYTES + 1),
+            "inputSchema": {"payload": "B" * (discovery.MAX_DESCRIPTOR_SCHEMA_BYTES + 1)},
+        },
+    )
+
+    assert descriptor.kind is DescriptorKind.TOOL
+    assert descriptor.truncation is not None
+    assert descriptor.truncation.exceeded_fields == ("description", "schema")
+    assert "TRUNCATED_BY_MCPSENTINEL" in descriptor.description
+    assert descriptor.schema["_mcpsentinel_truncated"]["original_sha256"]
 
 
 async def test_streamable_http_discovery_scans_metadata(tmp_path: Path) -> None:

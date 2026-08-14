@@ -7,8 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, PackageLoader, select_autoescape
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
-from .models import Finding, ScanReport, Severity, to_primitive
+from .models import Finding, ScanReport, Severity
+from .safety import safe_report_payload, safe_target_identity, sanitize_text, sanitize_value
 
 SARIF_LEVELS = {
     Severity.CRITICAL: "error",
@@ -20,7 +26,7 @@ SARIF_LEVELS = {
 
 
 def json_report(report: ScanReport) -> str:
-    return json.dumps(to_primitive(report), indent=2, sort_keys=True) + "\n"
+    return json.dumps(safe_report_payload(report), indent=2, sort_keys=True) + "\n"
 
 
 def sarif_report(report: ScanReport) -> str:
@@ -41,7 +47,7 @@ def sarif_report(report: ScanReport) -> str:
                     {
                         "executionSuccessful": True,
                         "properties": {
-                            "target": report.target.identity,
+                            "target": safe_target_identity(report.target),
                             "transport": report.target.transport,
                             "judge": report.judge,
                             "baseline_state": report.baseline_state,
@@ -53,14 +59,14 @@ def sarif_report(report: ScanReport) -> str:
             }
         ],
     }
-    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    return json.dumps(sanitize_value(payload), indent=2, sort_keys=True) + "\n"
 
 
 def text_report(report: ScanReport) -> str:
     counts = ", ".join(f"{level}={count}" for level, count in report.counts.items() if count)
     counts = counts or "no findings"
     lines = [
-        f"MCPSentinel scan: {report.target.identity}",
+        f"MCPSentinel scan: {safe_target_identity(report.target)}",
         f"Discovered: {len(report.descriptors)} descriptors | Judge: {report.judge}",
         (
             f"Baseline: {report.baseline_state}"
@@ -84,8 +90,17 @@ def text_report(report: ScanReport) -> str:
             filesystem_changes = (
                 "n/a"
                 if observation.filesystem_change_count is None
-                else str(observation.filesystem_change_count)
+                else (
+                    f"{observation.filesystem_change_count_before}"
+                    f"->{observation.filesystem_change_count}; "
+                    f"delta={observation.filesystem_change_delta:+d}"
+                    if observation.filesystem_change_count_before is not None
+                    and observation.filesystem_change_delta is not None
+                    else str(observation.filesystem_change_count)
+                )
             )
+            if observation.filesystem_telemetry_truncated:
+                filesystem_changes += " (truncated)"
             lines.append(
                 f"- {observation.tool_name}: {observation.status}; "
                 f"{observation.duration_ms} ms; processes={process_counts}; "
@@ -97,15 +112,75 @@ def text_report(report: ScanReport) -> str:
             [
                 "",
                 f"[{finding.severity.value.upper()}] {finding.rule_id} {finding.title}",
-                f"  Subject: {finding.subject_kind.value} {finding.subject_name}",
+                f"  Subject: {finding.subject_kind.value} {sanitize_text(finding.subject_name)}",
                 f"  Confidence: {finding.confidence:.0%} | Layers: {layers}",
-                f"  {finding.message}",
-                f"  Evidence: {finding.evidence[0]}",
+                f"  {sanitize_text(finding.message)}",
+                f"  Evidence: {sanitize_text(finding.evidence[0])}",
             ]
         )
         if finding.rationale:
-            lines.append(f"  Triage: {finding.rationale}")
+            lines.append(f"  Triage: {sanitize_text(finding.rationale)}")
     return "\n".join(lines) + "\n"
+
+
+def terminal_report(report: ScanReport, console: Console | None = None) -> None:
+    """Render a human-first terminal summary without changing file report formats."""
+    console = console or Console()
+    target = safe_target_identity(report.target)
+    console.print(
+        Panel.fit(
+            Text.assemble(
+                ("MCPSentinel", "bold cyan"),
+                "  •  MCP Security Scanner\n",
+                (target, "bold"),
+                "\nRead-only metadata discovery",
+            ),
+            border_style="cyan",
+            padding=(0, 2),
+        )
+    )
+    summary = Table.grid(expand=False, padding=(0, 2))
+    summary.add_column(style="dim")
+    summary.add_column()
+    summary.add_row("Discovered", f"{len(report.descriptors)} descriptors")
+    summary.add_row("Judge", report.judge)
+    summary.add_row(
+        "Baseline",
+        report.baseline_state + (" (approved)" if report.baseline_updated else ""),
+    )
+    summary.add_row("Risk score", f"{report.risk_score}/100 ({report.risk_level.value})")
+    console.print(summary)
+
+    if report.findings:
+        table = Table(title="Findings", box=box.SIMPLE_HEAVY, expand=False)
+        table.add_column("Severity", style="bold", no_wrap=True)
+        table.add_column("Subject", style="cyan", overflow="fold")
+        table.add_column("Finding", overflow="fold")
+        table.add_column("Confidence", justify="right", no_wrap=True)
+        for finding in report.findings:
+            style = {
+                Severity.CRITICAL: "bold red",
+                Severity.HIGH: "bold bright_red",
+                Severity.MEDIUM: "bold yellow",
+                Severity.LOW: "bold blue",
+                Severity.INFO: "bold green",
+            }[finding.severity]
+            table.add_row(
+                Text(finding.severity.value.upper(), style=style),
+                Text(sanitize_text(finding.subject_name)),
+                Text(
+                    f"{finding.rule_id} · {sanitize_text(finding.title)}\n"
+                    f"{sanitize_text(finding.message)}"
+                ),
+                f"{finding.confidence:.0%}",
+            )
+        console.print(table)
+    else:
+        console.print("[green]✓[/green] No reportable findings.")
+
+    if report.notices:
+        notes = "\n".join(f"• {sanitize_text(note)}" for note in report.notices)
+        console.print(Panel(notes, title="Notes"))
 
 
 def html_report(report: ScanReport) -> str:
@@ -116,7 +191,7 @@ def html_report(report: ScanReport) -> str:
     )
     template = environment.get_template("risk_report.html")
     return template.render(
-        report=to_primitive(report),
+        report=safe_report_payload(report),
         counts=report.counts,
         risk_score=report.risk_score,
         risk_level=report.risk_level.value,

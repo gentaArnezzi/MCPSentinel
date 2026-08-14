@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from .models import Category, JudgeVerdict, StaticCandidate, to_primitive
 from .normalization import normalize_for_analysis
+from .safety import sanitize_text
 
 OPENAI_TIMEOUT_SECONDS = 30.0
 OPENAI_MAX_RETRIES = 2
@@ -33,30 +34,6 @@ _MAX_PROMPT_NAME_CHARS = 200
 _MAX_PROMPT_DESCRIPTION_CHARS = 1_600
 _MAX_PROMPT_SCHEMA_CHARS = 1_000
 _MAX_PROMPT_METADATA_CHARS = 1_000
-
-_SENSITIVE_REPLACEMENTS = (
-    (re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}\b"), "[REDACTED_OPENAI_KEY]"),
-    (re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"), "[REDACTED_GITHUB_TOKEN]"),
-    (re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"), "[REDACTED_AWS_ACCESS_KEY]"),
-    (
-        re.compile(
-            r"-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----.*?-----END(?: [A-Z]+)? PRIVATE KEY-----",
-            re.DOTALL,
-        ),
-        "[REDACTED_PRIVATE_KEY]",
-    ),
-    (
-        re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer|basic)\s+)[^\s\"',]+"),
-        r"\1[REDACTED_AUTHORIZATION]",
-    ),
-    (
-        re.compile(
-            r'(?i)("(?:api[_-]?key|access[_-]?token|secret|password)"\s*:\s*")[^"]+',
-        ),
-        r"\1[REDACTED_SECRET]",
-    ),
-)
-
 
 class SemanticJudgeError(RuntimeError):
     """The requested semantic provider could not supply a trustworthy verdict."""
@@ -257,10 +234,7 @@ def _find_parsed_output(response: object) -> _OpenAIOutput:
 
 def _redact_sensitive_text(value: str) -> str:
     """Minimize accidental credential disclosure when semantic review is enabled."""
-    redacted = value
-    for pattern, replacement in _SENSITIVE_REPLACEMENTS:
-        redacted = pattern.sub(replacement, redacted)
-    return redacted
+    return sanitize_text(value)
 
 
 def _excerpt(value: str, limit: int) -> str:

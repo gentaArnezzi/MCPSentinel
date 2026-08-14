@@ -8,6 +8,12 @@ from enum import Enum, StrEnum
 from typing import Any
 
 
+def _runtime_version() -> str:
+    from .version import __version__
+
+    return __version__
+
+
 class Severity(StrEnum):
     INFO = "info"
     LOW = "low"
@@ -31,6 +37,7 @@ class Category(StrEnum):
     CROSS_SERVER_ATTACK = "cross_server_attack"
     OAUTH_CONFUSED_DEPUTY = "oauth_confused_deputy"
     RUG_PULL = "rug_pull"
+    RESOURCE_EXHAUSTION = "resource_exhaustion"
 
 
 class DescriptorKind(StrEnum):
@@ -56,6 +63,7 @@ class TargetConfig:
     command: str | None = None
     arguments: tuple[str, ...] = ()
     environment: dict[str, str] = field(default_factory=dict)
+    inherit_environment: bool = False
     restrict_to_public_network: bool = False
 
 
@@ -68,6 +76,7 @@ class ToolDescriptor:
     description: str
     schema: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    truncation: DescriptorTruncation | None = None
 
     @property
     def key(self) -> str:
@@ -125,7 +134,20 @@ class DynamicObservation:
     process_count_before: int | None = None
     process_count_after: int | None = None
     filesystem_change_count: int | None = None
+    filesystem_change_count_before: int | None = None
+    filesystem_change_delta: int | None = None
+    filesystem_telemetry_truncated: bool = False
     detail: str | None = None
+
+
+@dataclass(frozen=True)
+class DescriptorTruncation:
+    """Evidence that a hostile descriptor exceeded scanner resource budgets."""
+
+    exceeded_fields: tuple[str, ...]
+    original_bytes: int
+    analyzed_bytes: int
+    original_sha256: str
 
 
 @dataclass
@@ -136,7 +158,7 @@ class ScanReport:
     started_at: datetime
     completed_at: datetime | None = None
     judge: str = "heuristic"
-    scan_version: str = "0.7.0"
+    scan_version: str = field(default_factory=_runtime_version)
     discovery_metadata: dict[str, Any] = field(default_factory=dict)
     dynamic_observations: list[DynamicObservation] = field(default_factory=list)
     baseline_state: str = "not_checked"

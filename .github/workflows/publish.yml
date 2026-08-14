@@ -56,10 +56,8 @@ jobs:
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
           project_version="$(python -c 'import tomllib; from pathlib import Path; print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])')"
-          package_version="$(awk -F '"' '/^__version__ = / { print $2 }' src/mcpsentinel/__init__.py)"
           registry_version="$(python -c 'import json; from pathlib import Path; print(json.loads(Path("registry/server.json").read_text())["version"])')"
           test "$tag_version" = "$project_version"
-          test "$project_version" = "$package_version"
           test "$project_version" = "$registry_version"
       - name: Install MCP Registry publisher
         shell: bash

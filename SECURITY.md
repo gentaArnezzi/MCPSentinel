@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-The latest release in the `0.2.x` line receives security fixes. Upgrade to the newest published version before reporting an issue.
+Only the latest stable release receives security fixes. Upgrade to the newest published version before reporting an issue.
 
 ## Reporting a vulnerability
 

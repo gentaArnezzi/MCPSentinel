@@ -57,6 +57,13 @@ class _SandboxTelemetry:
 
     process_count: int | None
     filesystem_change_count: int | None
+    filesystem_telemetry_truncated: bool = False
+
+
+@dataclass(frozen=True)
+class _DockerOutput:
+    lines: list[str]
+    truncated: bool = False
 
 
 _TELEMETRY_TIMEOUT_SECONDS = 2.0
@@ -150,6 +157,12 @@ async def run_dynamic_validation(
                     process_count_before=telemetry_before.process_count,
                     process_count_after=telemetry_after.process_count,
                     filesystem_change_count=telemetry_after.filesystem_change_count,
+                    filesystem_change_count_before=telemetry_before.filesystem_change_count,
+                    filesystem_change_delta=_filesystem_delta(telemetry_before, telemetry_after),
+                    filesystem_telemetry_truncated=(
+                        telemetry_before.filesystem_telemetry_truncated
+                        or telemetry_after.filesystem_telemetry_truncated
+                    ),
                 )
                 observations.append(observation)
                 if response_finding is not None:
@@ -191,12 +204,17 @@ async def _capture_telemetry(container_id: str | None) -> _SandboxTelemetry:
         _docker_output("diff", container_id),
     )
     return _SandboxTelemetry(
-        process_count=_process_count(processes),
-        filesystem_change_count=len(filesystem_changes) if filesystem_changes is not None else None,
+        process_count=_process_count(processes.lines if processes is not None else None),
+        filesystem_change_count=(
+            len(filesystem_changes.lines) if filesystem_changes is not None else None
+        ),
+        filesystem_telemetry_truncated=(
+            filesystem_changes.truncated if filesystem_changes is not None else False
+        ),
     )
 
 
-async def _docker_output(*arguments: str) -> list[str] | None:
+async def _docker_output(*arguments: str) -> _DockerOutput | None:
     """Return bounded Docker CLI output without retaining untrusted telemetry details."""
     try:
         process = await asyncio.create_subprocess_exec(
@@ -217,7 +235,16 @@ async def _docker_output(*arguments: str) -> list[str] | None:
         return None
     if process.returncode != 0:
         return None
-    return stdout[:65536].decode("utf-8", errors="replace").splitlines()
+    return _DockerOutput(
+        lines=stdout[:65536].decode("utf-8", errors="replace").splitlines(),
+        truncated=len(stdout) > 65536,
+    )
+
+
+def _filesystem_delta(before: _SandboxTelemetry, after: _SandboxTelemetry) -> int | None:
+    if before.filesystem_change_count is None or after.filesystem_change_count is None:
+        return None
+    return after.filesystem_change_count - before.filesystem_change_count
 
 
 def _process_count(lines: list[str] | None) -> int | None:

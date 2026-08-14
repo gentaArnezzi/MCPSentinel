@@ -87,8 +87,9 @@ def test_html_report_autoescapes_untrusted_target_and_evidence() -> None:
     report.complete()
     rendered = html_report(report)
 
-    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in rendered
-    assert "<script>alert(1)</script>" not in rendered
+    assert "&lt;script&gt;bad&lt;/script&gt;" in rendered
+    assert "<script>bad</script>" not in rendered
+    assert "http://x" in rendered
 
 
 def test_sandbox_target_has_no_network_mounts_or_privileges(monkeypatch) -> None:
@@ -152,12 +153,14 @@ def test_reports_render_dynamic_telemetry_counts_without_process_details() -> No
                 process_count_before=1,
                 process_count_after=2,
                 filesystem_change_count=0,
+                filesystem_change_count_before=0,
+                filesystem_change_delta=0,
             )
         ],
     )
     report.complete()
 
-    assert "processes=1->2; filesystem_changes=0" in text_report(report)
+    assert "processes=1->2; filesystem_changes=0->0; delta=+0" in text_report(report)
     assert "Filesystem changes" in html_report(report)
 
 

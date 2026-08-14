@@ -9,6 +9,7 @@ from .baseline import BaselineStore, stable_hash
 from .discovery import discover
 from .dynamic import DynamicConfig, run_dynamic_validation
 from .models import (
+    Category,
     Finding,
     JudgeVerdict,
     ScanReport,
@@ -64,6 +65,7 @@ async def scan(
         policy.semantic_threshold if policy.semantic_threshold is not None else semantic_threshold
     )
     report.findings.extend(await _semantic_findings(semantic_candidates, judge, store, threshold))
+    report.findings.extend(_descriptor_limit_findings(descriptors))
     comparison = store.compare(target, descriptors)
     report.baseline_state = (
         "missing"
@@ -103,6 +105,42 @@ async def scan(
         )
     report.complete()
     return report
+
+
+def _descriptor_limit_findings(descriptors) -> list[Finding]:
+    """Surface incomplete analysis rather than silently accepting oversized metadata."""
+    findings: list[Finding] = []
+    for descriptor in descriptors:
+        truncation = descriptor.truncation
+        if truncation is None:
+            continue
+        fields = ", ".join(truncation.exceeded_fields)
+        findings.append(
+            Finding(
+                rule_id="MCP-N001",
+                title="MCP descriptor exceeds metadata resource limits",
+                category=Category.RESOURCE_EXHAUSTION,
+                severity=Severity.MEDIUM,
+                message=(
+                    f"The {descriptor.kind.value} '{descriptor.name}' exceeded the scanner's "
+                    "metadata safety limits and was only partially analyzed."
+                ),
+                subject_kind=descriptor.kind,
+                subject_name=descriptor.name,
+                evidence=(
+                    f"Exceeded fields: {fields}; original={truncation.original_bytes} bytes; "
+                    f"analyzed={truncation.analyzed_bytes} bytes; "
+                    f"sha256={truncation.original_sha256}.",
+                ),
+                confidence=0.98,
+                layers=("normalization",),
+                rationale=(
+                    "Review the descriptor at its source before trusting it. The scanner retained "
+                    "only bounded excerpts and fingerprints to prevent metadata-driven exhaustion."
+                ),
+            )
+        )
+    return findings
 
 
 async def _semantic_findings(

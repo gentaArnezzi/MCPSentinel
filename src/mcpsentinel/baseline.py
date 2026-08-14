@@ -19,6 +19,7 @@ from .models import (
     ToolDescriptor,
     to_primitive,
 )
+from .safety import safe_target_identity
 
 
 def stable_hash(value: Any) -> str:
@@ -63,7 +64,9 @@ class BaselineStore:
             return BaselineComparison(findings=[], prior_exists=False)
 
         current = {item.key: stable_hash(item) for item in descriptors}
+        current_field_hashes = {item.key: _field_hashes(item) for item in descriptors}
         old = previous.get("descriptor_hashes", {})
+        old_field_hashes = previous.get("descriptor_field_hashes", {})
         findings: list[Finding] = []
 
         for key in sorted(current.keys() - old.keys()):
@@ -75,16 +78,32 @@ class BaselineStore:
         for key in sorted(current.keys() & old.keys()):
             if current[key] != old[key]:
                 kind, name = key.split(":", maxsplit=1)
-                findings.append(_baseline_finding(kind, name, "changed", Severity.HIGH))
+                changed_fields = tuple(
+                    field
+                    for field in ("description", "schema", "metadata")
+                    if current_field_hashes[key].get(field)
+                    != old_field_hashes.get(key, {}).get(field)
+                )
+                findings.append(
+                    _baseline_finding(
+                        kind,
+                        name,
+                        "changed",
+                        Severity.HIGH,
+                        changed_fields=changed_fields,
+                    )
+                )
         return BaselineComparison(findings=findings, prior_exists=True)
 
     def save_snapshot(self, target: TargetConfig, descriptors: list[ToolDescriptor]) -> None:
         descriptor_hashes = {item.key: stable_hash(item) for item in descriptors}
+        descriptor_field_hashes = {item.key: _field_hashes(item) for item in descriptors}
         payload = {
-            "version": 1,
-            "target": {"transport": target.transport, "identity": target.identity},
+            "version": 2,
+            "target": {"transport": target.transport, "identity": safe_target_identity(target)},
             "captured_at": datetime.now(UTC).isoformat(),
             "descriptor_hashes": descriptor_hashes,
+            "descriptor_field_hashes": descriptor_field_hashes,
         }
         self._atomic_write(self._snapshot_path(target), payload)
 
@@ -118,20 +137,44 @@ class BaselineStore:
         temporary.replace(path)
 
 
-def _baseline_finding(kind: str, name: str, change: str, severity: Severity) -> Finding:
+def _field_hashes(descriptor: ToolDescriptor) -> dict[str, str]:
+    return {
+        "description": stable_hash(descriptor.description),
+        "schema": stable_hash(descriptor.schema),
+        "metadata": stable_hash(descriptor.metadata),
+    }
+
+
+def _baseline_finding(
+    kind: str,
+    name: str,
+    change: str,
+    severity: Severity,
+    *,
+    changed_fields: tuple[str, ...] = (),
+) -> Finding:
     try:
         descriptor_kind = DescriptorKind(kind)
     except ValueError:
         descriptor_kind = DescriptorKind.TOOL
+    field_summary = ", ".join(changed_fields)
+    evidence = (
+        f"Baseline diff: changed fields: {field_summary}."
+        if changed_fields
+        else f"Baseline diff: descriptor was {change}.",
+    )
+    message = f"The {descriptor_kind.value} '{name}' was {change} since the previous scan."
+    if field_summary:
+        message += f" Changed fields: {field_summary}."
     return Finding(
         rule_id="MCP-B001",
         title="MCP definition changed since trusted baseline",
         category=Category.RUG_PULL,
         severity=severity,
-        message=f"The {descriptor_kind.value} '{name}' was {change} since the previous scan.",
+        message=message,
         subject_kind=descriptor_kind,
         subject_name=name,
-        evidence=(f"Baseline diff: descriptor was {change}.",),
+        evidence=evidence,
         confidence=0.92,
         layers=("baseline",),
         rationale=(

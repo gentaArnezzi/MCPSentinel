@@ -43,7 +43,7 @@ $ mcpsentinel
 |                     Read-only by default                       |
 +----------------------------------------------------------------+
 
-Welcome to MCPSentinel 0.7.0
+Welcome to MCPSentinel 0.8.0
 
 1. Run your first offline scan:
    mcpsentinel scan http://localhost:8000/mcp
@@ -74,8 +74,8 @@ discover metadata  ->  static candidates  ->  semantic triage  ->  human review
 - MCP discovery over stdio and Streamable HTTP
 - configurable static pattern rules for tool, prompt, and resource descriptors, including tool poisoning, shadowing, cross-server, and OAuth confused-deputy signals
 - semantic triage: offline heuristic by default, optional OpenAI structured-output judge with bounded fallback
-- explicit baseline approval and rug-pull definition diffs
-- terminal, JSON, SARIF, and self-contained HTML risk reports
+- explicit baseline approval and field-aware rug-pull definition diffs
+- branded Rich terminal, JSON, SARIF, and self-contained HTML risk reports
 - allow/deny policy configuration
 - explicit, Docker-sandboxed owned-tool validation with no network egress
 - GitHub Action and MCP-native scanner interfaces
@@ -133,6 +133,13 @@ Or keep the executable and arguments separate. Arguments beginning with a dash n
 mcpsentinel scan python --transport stdio --arg=-m --arg=example_mcp_server
 ```
 
+Stdio targets run as an untrusted child process. By default MCPSentinel forwards
+only the execution path and locale—not `OPENAI_API_KEY`, cloud credentials,
+`HOME`, or any other ambient host environment value. Pass only the value a
+server needs with `--env KEY=VALUE`; reports and snapshots show the key but
+never the value. `--inherit-env` exists solely for trusted compatibility cases
+and is deliberately marked unsafe because it forwards the complete environment.
+
 Useful options:
 
 ```bash
@@ -152,7 +159,7 @@ mcpsentinel scan http://localhost:8000/mcp --baseline-dir .mcpsentinel/baselines
 mcpsentinel scan http://localhost:8000/mcp --baseline-dir .mcpsentinel/baselines --approve-baseline
 ```
 
-Baseline snapshots are kept in `~/.mcpsentinel/baselines` by default, but are **never updated by an ordinary scan**. A changed, added, or removed descriptor is surfaced as an `MCP-B001` rug-pull review finding while the prior approved snapshot is preserved. Review the report, then use `--approve-baseline` deliberately to create or replace the snapshot. This prevents an unattended scan from silently accepting a rug-pull change.
+Baseline snapshots are kept in `~/.mcpsentinel/baselines` by default, but are **never updated by an ordinary scan**. A changed, added, or removed descriptor is surfaced as an `MCP-B001` rug-pull review finding while the prior approved snapshot is preserved. For changes, the report identifies whether the description, input schema, and/or metadata changed without storing a raw historical descriptor. Review the report, then use `--approve-baseline` deliberately to create or replace the snapshot. This prevents an unattended scan from silently accepting a rug-pull change.
 
 The first scan reports that no approved baseline exists. That is an onboarding state, not a vulnerability finding. Establish a baseline only from a server version and environment you trust.
 
@@ -186,7 +193,7 @@ Pass `--rules path/to/rules.json` to add rule objects to the built-in rules. Eac
 
 Supported categories are `prompt_injection`, `tool_poisoning`, `tool_shadowing`, `ssrf`, `secret_exfiltration`, `command_execution`, `destructive_operation`, `cross_server_attack`, `oauth_confused_deputy`, and `rug_pull`.
 
-Before regex evaluation, the scanner applies Unicode NFKC normalization, removes format controls such as zero-width characters, and collapses whitespace in an analysis-only view. Original descriptor text remains unchanged in reports and baselines. It intentionally does not rewrite cross-script homoglyphs because that would risk misrepresenting legitimate metadata; use the benchmark to track those coverage gaps before claiming support for them.
+Before regex evaluation, the scanner applies Unicode NFKC normalization, removes format controls such as zero-width characters, and collapses whitespace in an analysis-only view. It intentionally does not rewrite cross-script homoglyphs because that would risk misrepresenting legitimate metadata; use the benchmark to track those coverage gaps before claiming support for them. Descriptor fields also have byte budgets (4 KiB name, 64 KiB description, 192 KiB each for schema and metadata, 512 KiB total). An over-limit descriptor produces `MCP-N001` with the original byte count and SHA-256, while only bounded data reaches reports, rules, baselines, or an optional semantic judge.
 
 ## Policy configuration
 
@@ -216,7 +223,7 @@ mcpsentinel scan "python -m my_server" --transport stdio \
 
 The dynamic server image must already exist locally; MCPSentinel uses `--pull=never`. Every explicit tool invocation receives its own fresh container/session, so state from one selected tool cannot affect another. Docker is not needed for normal metadata scans. A dynamic response is retained only as a SHA-256 digest and content-type summary.
 
-For each owned-target invocation, MCPSentinel also records the Docker process count immediately before and after the call, plus the number of copy-on-write filesystem changes reported by Docker. It never retains process arguments or filesystem paths. An additional process still running after the call produces `MCP-D002`; it is a review signal for background work, **not** evidence of a host escape. Credential-like response material produces `MCP-D001` without writing response text to disk. This bounded telemetry does not trace syscalls, inspect arbitrary environment reads, or prove that no network connection was attempted—the container's `--network=none` boundary remains the network control.
+For each owned-target invocation, MCPSentinel records Docker process counts immediately before and after the call, plus copy-on-write filesystem changes as `before → after` and a delta. It marks telemetry as truncated if Docker output hit its collection budget, and never retains process arguments or filesystem paths. An additional process still running after the call produces `MCP-D002`; it is a review signal for background work, **not** evidence of a host escape. Credential-like response material produces `MCP-D001` without writing response text to disk. This bounded telemetry does not trace syscalls, inspect arbitrary environment reads, or prove that no network connection was attempted—the container's `--network=none` boundary remains the network control.
 
 The repository includes a deliberately local-only Docker fixture to verify this boundary end to end. It is excluded from the normal test suite because it needs a running Docker daemon and builds an image:
 
@@ -233,7 +240,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.7.0
+- uses: gentaArnezzi/MCPSentinel@v0.8.0
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -248,7 +255,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.7.0
+- uses: gentaArnezzi/MCPSentinel@v0.8.0
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -282,8 +289,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.7.0
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.7.0 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.0
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.0 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:
@@ -350,7 +357,7 @@ pytest
 ruff check .
 ```
 
-The project is intentionally dependency-light: `mcp` handles protocol discovery, while the core rule engine, snapshot store, and report writers use the standard library.
+The project is intentionally dependency-light: `mcp` handles protocol discovery, `Rich` renders the interactive terminal view, and the core rule engine, snapshot store, and report writers use the standard library.
 
 ## Security
 
