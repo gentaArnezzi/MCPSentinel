@@ -53,7 +53,25 @@ async def scan(
         policy.semantic_threshold if policy.semantic_threshold is not None else semantic_threshold
     )
     report.findings.extend(await _semantic_findings(semantic_candidates, judge, store, threshold))
-    report.findings.extend(store.compare(target, descriptors).findings)
+    comparison = store.compare(target, descriptors)
+    report.baseline_state = (
+        "missing"
+        if not comparison.prior_exists
+        else "changed"
+        if comparison.findings
+        else "unchanged"
+    )
+    report.findings.extend(comparison.findings)
+    if not comparison.prior_exists:
+        report.notices.append(
+            "No approved baseline exists. Review this scan, then rerun with "
+            "--approve-baseline to create one."
+        )
+    elif comparison.findings:
+        report.notices.append(
+            "The approved baseline was preserved. Review the change before using "
+            "--approve-baseline to accept the new definition."
+        )
     if dynamic_config is not None:
         dynamic = await run_dynamic_validation(dynamic_config, report.findings)
         report.dynamic_observations.extend(dynamic.observations)
@@ -64,6 +82,14 @@ async def scan(
 
     if update_baseline:
         store.save_snapshot(target, descriptors)
+        report.baseline_updated = True
+        report.notices.append("The current definition was explicitly approved as the new baseline.")
+    fallback_count = getattr(judge, "fallback_count", 0)
+    if fallback_count:
+        report.notices.append(
+            "OpenAI semantic review was unavailable for "
+            f"{fallback_count} candidate(s); the offline heuristic was used instead."
+        )
     report.complete()
     return report
 
@@ -86,7 +112,8 @@ async def _semantic_findings(
         verdict = store.load_judgement(cache_key)
         if verdict is None:
             verdict = await judge.assess(candidate)
-            store.save_judgement(cache_key, verdict)
+            if not getattr(judge, "used_fallback_for_last_assessment", False):
+                store.save_judgement(cache_key, verdict)
         if not verdict.should_report or verdict.confidence < threshold:
             continue
         findings.append(

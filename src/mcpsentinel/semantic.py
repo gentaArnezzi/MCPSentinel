@@ -16,6 +16,30 @@ from .models import Category, JudgeVerdict, StaticCandidate, to_primitive
 
 OPENAI_TIMEOUT_SECONDS = 30.0
 OPENAI_MAX_RETRIES = 2
+MAX_OPENAI_PROMPT_CHARS = 12_000
+
+_SENSITIVE_REPLACEMENTS = (
+    (re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}\b"), "[REDACTED_OPENAI_KEY]"),
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"), "[REDACTED_GITHUB_TOKEN]"),
+    (re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"), "[REDACTED_AWS_ACCESS_KEY]"),
+    (
+        re.compile(
+            r"-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----.*?-----END(?: [A-Z]+)? PRIVATE KEY-----",
+            re.DOTALL,
+        ),
+        "[REDACTED_PRIVATE_KEY]",
+    ),
+    (
+        re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer|basic)\s+)[^\s\"',]+"),
+        r"\1[REDACTED_AUTHORIZATION]",
+    ),
+    (
+        re.compile(
+            r'(?i)("(?:api[_-]?key|access[_-]?token|secret|password)"\s*:\s*")[^"]+',
+        ),
+        r"\1[REDACTED_SECRET]",
+    ),
+)
 
 
 class SemanticJudgeError(RuntimeError):
@@ -151,19 +175,23 @@ class OpenAIJudge(SemanticJudge):
 
     def _assess_sync(self, candidate: StaticCandidate) -> JudgeVerdict:
         descriptor = to_primitive(candidate.descriptor)
-        prompt = json.dumps(
-            {
-                "static_candidate": {
-                    "rule_id": candidate.rule_id,
-                    "title": candidate.title,
-                    "category": candidate.category.value,
-                    "description": candidate.description,
-                    "evidence": candidate.evidence,
+        prompt = _redact_sensitive_text(
+            json.dumps(
+                {
+                    "static_candidate": {
+                        "rule_id": candidate.rule_id,
+                        "title": candidate.title,
+                        "category": candidate.category.value,
+                        "description": candidate.description,
+                        "evidence": candidate.evidence,
+                    },
+                    "mcp_descriptor": descriptor,
                 },
-                "mcp_descriptor": descriptor,
-            },
-            sort_keys=True,
+                sort_keys=True,
+            )
         )
+        if len(prompt) > MAX_OPENAI_PROMPT_CHARS:
+            prompt = prompt[:MAX_OPENAI_PROMPT_CHARS] + "\n[METADATA_TRUNCATED]"
         try:
             response = self._client.responses.parse(
                 model=self.model,
@@ -191,6 +219,26 @@ class OpenAIJudge(SemanticJudge):
         )
 
 
+class AutoJudge(SemanticJudge):
+    """Prefer OpenAI when configured, but keep a security scan available during API outages."""
+
+    def __init__(self, model: str) -> None:
+        self._primary = OpenAIJudge(model)
+        self._fallback = HeuristicJudge()
+        self.identity = f"auto:{self._primary.identity}"
+        self.fallback_count = 0
+        self.used_fallback_for_last_assessment = False
+
+    async def assess(self, candidate: StaticCandidate) -> JudgeVerdict:
+        self.used_fallback_for_last_assessment = False
+        try:
+            return await self._primary.assess(candidate)
+        except SemanticJudgeError:
+            self.used_fallback_for_last_assessment = True
+            self.fallback_count += 1
+            return await self._fallback.assess(candidate)
+
+
 def _find_parsed_output(response: object) -> _OpenAIOutput:
     for output in getattr(response, "output", []):
         for content in getattr(output, "content", []):
@@ -200,6 +248,14 @@ def _find_parsed_output(response: object) -> _OpenAIOutput:
     raise SemanticJudgeError("OpenAI returned no parsed structured semantic verdict.")
 
 
+def _redact_sensitive_text(value: str) -> str:
+    """Minimize accidental credential disclosure when semantic review is enabled."""
+    redacted = value
+    for pattern, replacement in _SENSITIVE_REPLACEMENTS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
 def build_judge(kind: str, model: str) -> SemanticJudge:
     """Resolve the CLI configuration without silently sending metadata off-device."""
     if kind == "heuristic":
@@ -207,5 +263,5 @@ def build_judge(kind: str, model: str) -> SemanticJudge:
     if kind == "openai":
         return OpenAIJudge(model)
     if kind == "auto":
-        return OpenAIJudge(model) if os.environ.get("OPENAI_API_KEY") else HeuristicJudge()
+        return AutoJudge(model) if os.environ.get("OPENAI_API_KEY") else HeuristicJudge()
     raise SemanticJudgeError(f"Unknown judge type: {kind}")

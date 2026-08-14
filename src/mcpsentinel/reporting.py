@@ -44,6 +44,8 @@ def sarif_report(report: ScanReport) -> str:
                             "target": report.target.identity,
                             "transport": report.target.transport,
                             "judge": report.judge,
+                            "baseline_state": report.baseline_state,
+                            "notices": report.notices,
                         },
                     }
                 ],
@@ -60,9 +62,16 @@ def text_report(report: ScanReport) -> str:
     lines = [
         f"MCPSentinel scan: {report.target.identity}",
         f"Discovered: {len(report.descriptors)} descriptors | Judge: {report.judge}",
+        (
+            f"Baseline: {report.baseline_state}"
+            + (" | explicitly approved" if report.baseline_updated else "")
+        ),
         f"Risk score: {report.risk_score}/100 ({report.risk_level.value})",
         f"Findings: {counts}",
     ]
+    if report.notices:
+        lines.extend(["", "Notes:"])
+        lines.extend(f"- {notice}" for notice in report.notices)
     for finding in report.findings:
         layers = "+".join(finding.layers)
         lines.extend(

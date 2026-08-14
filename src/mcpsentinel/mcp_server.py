@@ -23,7 +23,7 @@ mcp = MCPServer(
         "Scan targets only when an operator has configured them in MCPSENTINEL_ALLOWED_HOSTS. "
         "Dynamic execution is intentionally unavailable through this server."
     ),
-    version="0.1.2",
+    version="0.2.0",
 )
 
 
@@ -45,7 +45,6 @@ mcp = MCPServer(
 async def scan_mcp_server(
     target: str,
     transport: str = "auto",
-    update_baseline: bool = False,
 ) -> dict[str, object]:
     """Scan a server after operator-controlled target and egress authorization checks."""
     target_config = _target_from_mcp_request(target, transport)
@@ -54,7 +53,9 @@ async def scan_mcp_server(
         rules_path=_configured_path("MCPSENTINEL_RULES_PATH"),
         policy_path=_configured_path("MCPSENTINEL_POLICY_PATH"),
         baseline_root=Path(os.environ.get("MCPSENTINEL_MCP_BASELINE_DIR", "~/.mcpsentinel")),
-        update_baseline=update_baseline,
+        update_baseline=(
+            os.environ.get("MCPSENTINEL_MCP_APPROVE_BASELINE", "").lower() in _TRUE_VALUES
+        ),
         judge_kind=os.environ.get("MCPSENTINEL_MCP_JUDGE", "heuristic"),
         judge_model=os.environ.get("MCPSENTINEL_MCP_JUDGE_MODEL", "gpt-4o-mini"),
         semantic_threshold=0.70,

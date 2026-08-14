@@ -37,8 +37,16 @@ jobs:
       - run: uv sync --locked --all-extras
       - run: MCPSENTINEL_RUN_DOCKER_TESTS=1 uv run pytest -q tests/test_dynamic_docker_e2e.py
 
+  container-smoke-test:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: docker build --tag mcpsentinel:ci .
+      - run: docker run --rm --read-only --user 10001:10001 mcpsentinel:ci --version
+
   action-smoke-test:
-    needs: [test, docker-sandbox-test]
+    needs: [test, docker-sandbox-test, container-smoke-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5

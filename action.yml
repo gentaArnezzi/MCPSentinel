@@ -20,9 +20,13 @@ inputs:
     required: false
     default: mcpsentinel.sarif
   baseline-dir:
-    description: Baseline and judge-cache directory, normally persisted by the workflow cache.
+    description: Approved baseline and judge-cache directory, normally persisted by the workflow cache.
     required: false
     default: .mcpsentinel
+  approve-baseline:
+    description: "Set true only in a reviewed, trusted workflow to replace the approved baseline."
+    required: false
+    default: "false"
   rules:
     description: Optional additive JSON rule file path.
     required: false
@@ -56,6 +60,7 @@ runs:
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_REPORT_PATH: ${{ inputs.report-path }}
         INPUT_BASELINE_DIR: ${{ inputs.baseline-dir }}
+        INPUT_APPROVE_BASELINE: ${{ inputs.approve-baseline }}
         INPUT_RULES: ${{ inputs.rules }}
         INPUT_POLICY: ${{ inputs.policy }}
         INPUT_JUDGE: ${{ inputs.judge }}
@@ -64,6 +69,7 @@ runs:
         python -m pip install --no-deps --no-build-isolation "$GITHUB_ACTION_PATH"
         python -m pip check
         command=(scan "$INPUT_TARGET" --transport "$INPUT_TRANSPORT" --format sarif --output "$INPUT_REPORT_PATH" --baseline-dir "$INPUT_BASELINE_DIR" --judge "$INPUT_JUDGE" --fail-on "$INPUT_FAIL_ON")
+        if [[ "$INPUT_APPROVE_BASELINE" == "true" ]]; then command+=(--approve-baseline); fi
         if [[ -n "$INPUT_RULES" ]]; then command+=(--rules "$INPUT_RULES"); fi
         if [[ -n "$INPUT_POLICY" ]]; then command+=(--policy "$INPUT_POLICY"); fi
         mcpsentinel "${command[@]}"

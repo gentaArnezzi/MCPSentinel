@@ -70,10 +70,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--baseline-dir",
         type=Path,
         default=Path("~/.mcpsentinel"),
-        help="Directory used for metadata snapshots and judge cache (default: ~/.mcpsentinel).",
+        help="Approved metadata snapshots and judge cache (default: ~/.mcpsentinel).",
     )
     scan_parser.add_argument(
-        "--no-baseline-update", action="store_true", help="Read but do not update baseline."
+        "--approve-baseline",
+        action="store_true",
+        help="Explicitly replace the approved metadata baseline after reviewing this scan.",
+    )
+    scan_parser.add_argument(
+        "--no-baseline-update",
+        action="store_true",
+        help="Compatibility option; scans preserve the baseline unless --approve-baseline is set.",
     )
     scan_parser.add_argument(
         "--judge",
@@ -196,6 +203,8 @@ server tools. Dynamic tool validation is a separate explicit opt-in.
 
 3. Review the baseline diff on later scans. Baselines default to:
    ~/.mcpsentinel/baselines
+   After review, create or replace one explicitly:
+   {first_scan} --approve-baseline
 
 4. Optional semantic review:
    {openai_hint}
@@ -248,13 +257,15 @@ def _target_from_args(args: argparse.Namespace) -> TargetConfig:
 
 
 async def _run_scan(args: argparse.Namespace) -> int:
+    if args.approve_baseline and args.no_baseline_update:
+        raise ValueError("--approve-baseline cannot be combined with --no-baseline-update.")
     target = _target_from_args(args)
     report = await scan(
         target,
         rules_path=args.rules,
         policy_path=args.policy,
         baseline_root=args.baseline_dir,
-        update_baseline=not args.no_baseline_update,
+        update_baseline=args.approve_baseline,
         judge_kind=args.judge,
         judge_model=args.judge_model,
         semantic_threshold=args.semantic_threshold,

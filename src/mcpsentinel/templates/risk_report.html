@@ -20,11 +20,13 @@
       <p class="muted">MCPSentinel security report</p>
       <h1>{{ report.target.identity }}</h1>
       <p class="muted">Completed {{ report.completed_at }} · {{ report.descriptors|length }} descriptors · judge: {{ report.judge }}</p>
+      <p class="muted">Baseline: {{ report.baseline_state }}{% if report.baseline_updated %} · explicitly approved{% endif %}</p>
     </header>
     <section class="grid">
       <div class="metric"><div class="muted">Risk score</div><div class="score {{ risk_level }}">{{ risk_score }}/100</div><div class="pill {{ risk_level }}">{{ risk_level }}</div></div>
       {% for severity, count in counts.items() %}<div class="metric"><div class="muted">{{ severity }}</div><div class="score {{ severity }}">{{ count }}</div></div>{% endfor %}
     </section>
+    {% if report.notices %}<section><h2>Scan notes</h2><ul>{% for notice in report.notices %}<li>{{ notice }}</li>{% endfor %}</ul></section>{% endif %}
     <section>
       <h2>Findings</h2>
       {% if report.findings %}
