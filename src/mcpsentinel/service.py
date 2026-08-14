@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from .baseline import BaselineStore, stable_hash
 from .discovery import discover
 from .dynamic import DynamicConfig, run_dynamic_validation
-from .models import Finding, ScanReport, Severity, StaticCandidate, TargetConfig, utc_now
+from .models import (
+    Finding,
+    JudgeVerdict,
+    ScanReport,
+    Severity,
+    StaticCandidate,
+    TargetConfig,
+    utc_now,
+)
 from .policy import load_policy
 from .rules import StaticAnalyzer, load_rules
 from .semantic import SemanticJudge, build_judge
+
+MAX_SEMANTIC_CONCURRENCY = 4
 
 
 async def scan(
@@ -100,20 +111,27 @@ async def _semantic_findings(
     store: BaselineStore,
     threshold: float,
 ) -> list[Finding]:
-    findings: list[Finding] = []
-    for candidate in candidates:
+    semaphore = asyncio.Semaphore(MAX_SEMANTIC_CONCURRENCY)
+
+    async def assess_candidate(candidate: StaticCandidate) -> tuple[StaticCandidate, JudgeVerdict]:
         cache_key = stable_hash(
             {
-                "judge": judge.identity,
+                "judge": getattr(judge, "cache_identity", judge.identity),
                 "rule_id": candidate.rule_id,
                 "descriptor": candidate.descriptor,
             }
         )
         verdict = store.load_judgement(cache_key)
         if verdict is None:
-            verdict = await judge.assess(candidate)
-            if not getattr(judge, "used_fallback_for_last_assessment", False):
+            async with semaphore:
+                verdict = await judge.assess(candidate)
+            if judge.can_cache(verdict):
                 store.save_judgement(cache_key, verdict)
+        return candidate, verdict
+
+    assessed = await asyncio.gather(*(assess_candidate(candidate) for candidate in candidates))
+    findings: list[Finding] = []
+    for candidate, verdict in assessed:
         if not verdict.should_report or verdict.confidence < threshold:
             continue
         findings.append(

@@ -92,6 +92,43 @@ async def test_public_network_restriction_rejects_private_dns(monkeypatch) -> No
         await discovery._require_public_http_destination("https://scanner.example/mcp")
 
 
+async def test_public_network_restriction_pins_validated_public_addresses(monkeypatch) -> None:
+    class Loop:
+        async def getaddrinfo(self, *_: object, **__: object):
+            return [
+                (0, 0, 0, "", ("93.184.216.34", 443)),
+                (0, 0, 0, "", ("2606:4700:4700::1111", 443)),
+            ]
+
+    monkeypatch.setattr(discovery.asyncio, "get_running_loop", lambda: Loop())
+
+    addresses = await discovery._require_public_http_destination("https://scanner.example/mcp")
+
+    assert addresses == ("2606:4700:4700::1111", "93.184.216.34")
+
+
+async def test_pinned_network_backend_never_re_resolves_the_validated_hostname() -> None:
+    class Delegate:
+        def __init__(self) -> None:
+            self.hosts: list[str] = []
+
+        async def connect_tcp(self, **kwargs: object) -> object:
+            self.hosts.append(str(kwargs["host"]))
+            return object()
+
+        async def sleep(self, _: float) -> None:
+            return None
+
+    delegate = Delegate()
+    backend = discovery._PinnedPublicNetworkBackend(
+        "scanner.example", 443, ("93.184.216.34",), delegate
+    )
+
+    await backend.connect_tcp("scanner.example", 443)
+
+    assert delegate.hosts == ["93.184.216.34"]
+
+
 async def test_http_discovery_refuses_redirects(tmp_path: Path) -> None:
     class RedirectHandler(BaseHTTPRequestHandler):
         requests = 0

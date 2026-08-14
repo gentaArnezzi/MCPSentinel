@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models import Category, Severity, StaticCandidate, ToolDescriptor
+from ..normalization import normalize_for_analysis
 
 
 class RuleConfigurationError(ValueError):
@@ -99,10 +100,14 @@ def load_rules(extra_path: Path | None = None) -> list[StaticRule]:
 
 def _searchable_fields(descriptor: ToolDescriptor) -> dict[str, str]:
     return {
-        "name": descriptor.name,
-        "description": descriptor.description,
-        "schema": json.dumps(descriptor.schema, sort_keys=True),
-        "metadata": json.dumps(descriptor.metadata, sort_keys=True),
+        "name": normalize_for_analysis(descriptor.name),
+        "description": normalize_for_analysis(descriptor.description),
+        "schema": normalize_for_analysis(
+            json.dumps(descriptor.schema, sort_keys=True, ensure_ascii=False)
+        ),
+        "metadata": normalize_for_analysis(
+            json.dumps(descriptor.metadata, sort_keys=True, ensure_ascii=False)
+        ),
     }
 
 

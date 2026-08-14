@@ -799,9 +799,11 @@ wheels = [
 
 [[package]]
 name = "mcp-guardian-scan"
-version = "0.2.2"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpcore2" },
+    { name = "httpx2" },
     { name = "jinja2" },
     { name = "mcp" },
     { name = "openai" },
@@ -825,6 +827,8 @@ dev = [
 requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "hatchling", marker = "extra == 'build'", specifier = "==1.27.0" },
+    { name = "httpcore2", specifier = ">=2.10,<3" },
+    { name = "httpx2", specifier = ">=2.10,<3" },
     { name = "jinja2", specifier = ">=3.1.5,<4" },
     { name = "mcp", specifier = ">=2.0,<3" },
     { name = "openai", specifier = ">=2.11.0,<4" },

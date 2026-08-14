@@ -114,11 +114,14 @@ async def run_dynamic_validation(
 
     observations: list[DynamicObservation] = []
     findings: list[Finding] = []
-    target = sandbox_target(config)
     try:
-        async with _session_for(target) as session:
-            await session.initialize()
-            for invocation in config.invocations:
+        for invocation in config.invocations:
+            # Never let an earlier selected tool alter in-memory state or /tmp
+            # for a later tool. Each invocation starts and removes its own
+            # constrained Docker process.
+            target = sandbox_target(config)
+            async with _session_for(target) as session:
+                await session.initialize()
                 observation, finding = await _invoke(session, invocation, config.timeout_seconds)
                 observations.append(observation)
                 if finding is not None:

@@ -58,6 +58,15 @@ class BenchmarkReport:
     semantic_duration_ms: int
     static: ClassificationMetrics
     semantic: ClassificationMetrics
+    per_category: dict[str, CategoryMetrics]
+
+
+@dataclass(frozen=True)
+class CategoryMetrics:
+    """Static and semantic results for one attack category."""
+
+    static: ClassificationMetrics
+    semantic: ClassificationMetrics
 
 
 def _rule_ids(value: Any, *, field: str, case_id: str) -> set[str]:
@@ -114,9 +123,15 @@ def _descriptors_and_truth(
             raise BenchmarkConfigurationError(
                 f"Case {case_id!r} schema and metadata must be objects."
             )
+        try:
+            kind = DescriptorKind(case.get("kind", DescriptorKind.TOOL.value))
+        except ValueError as error:
+            raise BenchmarkConfigurationError(
+                f"Case {case_id!r} has an unsupported descriptor kind."
+            ) from error
         descriptors.append(
             ToolDescriptor(
-                kind=DescriptorKind.TOOL,
+                kind=kind,
                 name=name,
                 description=description,
                 schema=schema,
@@ -174,6 +189,9 @@ async def run_benchmark(
     rules = load_rules(rules_path)
     analyzer = StaticAnalyzer(rules)
     rule_ids = {rule.id for rule in rules}
+    category_rule_ids: dict[str, set[str]] = {}
+    for rule in rules:
+        category_rule_ids.setdefault(rule.category.value, set()).add(rule.id)
 
     static_started = time.perf_counter()
     candidates = analyzer.analyze(descriptors)
@@ -204,6 +222,27 @@ async def run_benchmark(
         semantic_duration_ms=semantic_duration_ms,
         static=_metrics(static_predictions, expected_reported, rule_ids),
         semantic=_metrics(semantic_predictions, expected_reported, rule_ids),
+        per_category={
+            category: CategoryMetrics(
+                static=_metrics(
+                    {item for item in static_predictions if item[1] in category_rules},
+                    {
+                        case_id: rules & category_rules
+                        for case_id, rules in expected_reported.items()
+                    },
+                    category_rules,
+                ),
+                semantic=_metrics(
+                    {item for item in semantic_predictions if item[1] in category_rules},
+                    {
+                        case_id: rules & category_rules
+                        for case_id, rules in expected_reported.items()
+                    },
+                    category_rules,
+                ),
+            )
+            for category, category_rules in sorted(category_rule_ids.items())
+        },
     )
 
 
@@ -220,6 +259,11 @@ def benchmark_text(report: BenchmarkReport) -> str:
             f"TN={metrics.true_negative}, FN={metrics.false_negative})"
         )
 
+    categories = tuple(
+        f"  {category}: {summary('static', metrics.static)}; "
+        f"{summary('semantic', metrics.semantic)}"
+        for category, metrics in report.per_category.items()
+    )
     return "\n".join(
         (
             f"Benchmark dataset: {report.dataset}",
@@ -227,6 +271,8 @@ def benchmark_text(report: BenchmarkReport) -> str:
             f"Cases: {report.case_count}; rules: {report.rule_count}",
             summary("Static candidates", report.static),
             summary("Semantic findings", report.semantic),
+            "Per category:",
+            *categories,
             (
                 "Timing: "
                 f"static={report.static_duration_ms}ms, semantic={report.semantic_duration_ms}ms; "

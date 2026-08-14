@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
+from mcpsentinel import dynamic
 from mcpsentinel.dynamic import DynamicConfig, DynamicInvocation, _invoke, sandbox_target
 from mcpsentinel.models import (
     Category,
@@ -113,3 +115,49 @@ def test_dynamic_response_does_not_retain_secret_but_reports_it() -> None:
     assert finding is not None
     assert finding.rule_id == "MCP-D001"
     assert "sk-controlled-test" not in finding.evidence[0]
+
+
+async def test_dynamic_validation_uses_a_fresh_sandbox_session_per_invocation(monkeypatch) -> None:
+    sessions: list[object] = []
+
+    class Session:
+        async def initialize(self) -> None:
+            return None
+
+        async def call_tool(self, name: str, _: dict[str, object]) -> dict[str, object]:
+            return {"content": [{"type": "text", "text": f"controlled {name}"}]}
+
+    @asynccontextmanager
+    async def fake_session_for(_: TargetConfig):
+        session = Session()
+        sessions.append(session)
+        yield session
+
+    monkeypatch.setattr(dynamic, "_session_for", fake_session_for)
+    monkeypatch.setattr(dynamic.shutil, "which", lambda _: "/usr/local/bin/docker")
+    eligible = [
+        Finding(
+            rule_id="MCP004",
+            title="Command execution",
+            category=Category.COMMAND_EXECUTION,
+            severity=Severity.HIGH,
+            message="test",
+            subject_kind=DescriptorKind.TOOL,
+            subject_name=name,
+            evidence=("test",),
+            confidence=0.9,
+            layers=("static", "semantic"),
+        )
+        for name in ("first", "second")
+    ]
+
+    result = await dynamic.run_dynamic_validation(
+        DynamicConfig(
+            image="controlled-fixture:test",
+            invocations=(DynamicInvocation("first", {}), DynamicInvocation("second", {})),
+        ),
+        eligible,
+    )
+
+    assert len(sessions) == 2
+    assert [item.tool_name for item in result.observations] == ["first", "second"]

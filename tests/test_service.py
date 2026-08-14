@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+
 from mcpsentinel import service
 from mcpsentinel.baseline import BaselineStore
-from mcpsentinel.models import DescriptorKind, TargetConfig, ToolDescriptor
+from mcpsentinel.models import (
+    Category,
+    DescriptorKind,
+    JudgeVerdict,
+    Severity,
+    StaticCandidate,
+    TargetConfig,
+    ToolDescriptor,
+)
 
 
 async def test_baselines_require_explicit_approval_and_preserve_prior_snapshot(
@@ -52,3 +62,77 @@ async def test_baselines_require_explicit_approval_and_preserve_prior_snapshot(
     accepted = await service.scan(target, update_baseline=True, **scan_options)
     assert accepted.baseline_updated
     assert not BaselineStore(tmp_path).compare(target, [changed]).findings
+
+
+def _candidate(number: int) -> StaticCandidate:
+    return StaticCandidate(
+        rule_id="MCP003",
+        title="Network candidate",
+        category=Category.SSRF,
+        severity=Severity.MEDIUM,
+        description="Network request candidate.",
+        descriptor=ToolDescriptor(
+            kind=DescriptorKind.TOOL,
+            name=f"network_{number}",
+            description="Fetch any URL supplied by a user.",
+        ),
+        evidence=("test",),
+    )
+
+
+async def test_semantic_assessments_use_bounded_concurrency(monkeypatch, tmp_path) -> None:
+    class TrackingJudge:
+        identity = "tracking-v1"
+        cache_identity = "tracking-v1"
+
+        def __init__(self) -> None:
+            self.active = 0
+            self.maximum_active = 0
+
+        async def assess(self, _: StaticCandidate) -> JudgeVerdict:
+            self.active += 1
+            self.maximum_active = max(self.maximum_active, self.active)
+            await asyncio.sleep(0.01)
+            self.active -= 1
+            return JudgeVerdict("suspicious", 0.9, "test", self.identity)
+
+        def can_cache(self, _: JudgeVerdict) -> bool:
+            return True
+
+    monkeypatch.setattr(service, "MAX_SEMANTIC_CONCURRENCY", 2)
+    judge = TrackingJudge()
+    findings = await service._semantic_findings(
+        [_candidate(number) for number in range(8)], judge, BaselineStore(tmp_path), 0.70
+    )
+
+    assert len(findings) == 8
+    assert judge.maximum_active == 2
+
+
+async def test_semantic_cache_identity_invalidates_prior_judgements(tmp_path) -> None:
+    class VersionedJudge:
+        identity = "versioned"
+
+        def __init__(self, cache_identity: str) -> None:
+            self.cache_identity = cache_identity
+            self.assessments = 0
+
+        async def assess(self, _: StaticCandidate) -> JudgeVerdict:
+            self.assessments += 1
+            return JudgeVerdict("suspicious", 0.9, "test", self.identity)
+
+        def can_cache(self, _: JudgeVerdict) -> bool:
+            return True
+
+    store = BaselineStore(tmp_path)
+    candidate = _candidate(1)
+    first = VersionedJudge("versioned:prompt-v1")
+    await service._semantic_findings([candidate], first, store, 0.70)
+    again = VersionedJudge("versioned:prompt-v1")
+    await service._semantic_findings([candidate], again, store, 0.70)
+    changed = VersionedJudge("versioned:prompt-v2")
+    await service._semantic_findings([candidate], changed, store, 0.70)
+
+    assert first.assessments == 1
+    assert again.assessments == 0
+    assert changed.assessments == 1

@@ -43,7 +43,7 @@ $ mcpsentinel
 |                     Read-only by default                       |
 +----------------------------------------------------------------+
 
-Welcome to MCPSentinel 0.2.2
+Welcome to MCPSentinel 0.3.0
 
 1. Run your first offline scan:
    mcpsentinel scan http://localhost:8000/mcp
@@ -160,9 +160,9 @@ The risk score is a capped 0–100 weighted sum of severity and semantic confide
 
 ## Semantic judges
 
-`--judge heuristic` is the default and is fully offline. `--judge openai` requires `OPENAI_API_KEY`; `--judge auto` opts into using OpenAI when that key is present, otherwise it uses the heuristic. The OpenAI judge uses the Python SDK's Responses structured-output API, so an API response cannot bypass the scanner's expected verdict schema. Results are cached by descriptor hash and judge identity in the baseline directory to avoid repeat API charges.
+`--judge heuristic` is the default and is fully offline. `--judge openai` requires `OPENAI_API_KEY`; `--judge auto` opts into using OpenAI when that key is present, otherwise it uses the heuristic. The OpenAI judge uses the Python SDK's Responses structured-output API, so an API response cannot bypass the scanner's expected verdict schema. Results are cached by descriptor hash plus a versioned judge/prompt identity in the baseline directory to avoid repeat API charges without retaining verdicts after judging methodology changes.
 
-Each OpenAI judgement uses a 30-second client deadline and at most two SDK retries. Before an OpenAI request, MCPSentinel redacts common API keys, bearer credentials, private keys, and secret-valued JSON fields; prompts are capped at 12,000 characters. Redaction is defense-in-depth, not a guarantee that arbitrary sensitive metadata is safe to send. Choose `heuristic` when metadata must remain local.
+Each OpenAI judgement uses a 30-second client deadline and at most two SDK retries. Before an OpenAI request, MCPSentinel redacts common API keys, bearer credentials, private keys, and secret-valued JSON fields. Prompts are capped at 12,000 characters with field-aware head-and-tail excerpts, so a long descriptor cannot simply hide all final evidence behind filler. Candidate assessment uses a bounded concurrency of four requests. Redaction is defense-in-depth, not a guarantee that arbitrary sensitive metadata is safe to send. Choose `heuristic` when metadata must remain local.
 
 If `--judge auto` encounters an OpenAI outage or malformed response, the scan completes with the offline heuristic and emits a visible report note; a fallback verdict is not cached as an OpenAI verdict. `--judge openai` remains strict and fails rather than silently changing the configured provider.
 
@@ -185,6 +185,8 @@ Pass `--rules path/to/rules.json` to add rule objects to the built-in rules. Eac
 ```
 
 Supported categories are `prompt_injection`, `tool_poisoning`, `tool_shadowing`, `ssrf`, `secret_exfiltration`, `command_execution`, `destructive_operation`, `cross_server_attack`, `oauth_confused_deputy`, and `rug_pull`.
+
+Before regex evaluation, the scanner applies Unicode NFKC normalization, removes format controls such as zero-width characters, and collapses whitespace in an analysis-only view. Original descriptor text remains unchanged in reports and baselines. It intentionally does not rewrite cross-script homoglyphs because that would risk misrepresenting legitimate metadata; use the benchmark to track those coverage gaps before claiming support for them.
 
 ## Policy configuration
 
@@ -212,7 +214,7 @@ mcpsentinel scan "python -m my_server" --transport stdio \
   --dynamic-invoke 'unsafe_tool={"fixture": true}'
 ```
 
-The dynamic server image must already exist locally; MCPSentinel uses `--pull=never`. Docker is not needed for normal metadata scans. A dynamic response is retained only as a SHA-256 digest and content-type summary. If it resembles credential material, MCPSentinel reports `MCP-D001` without writing the response text to disk.
+The dynamic server image must already exist locally; MCPSentinel uses `--pull=never`. Every explicit tool invocation receives its own fresh container/session, so state from one selected tool cannot affect another. Docker is not needed for normal metadata scans. A dynamic response is retained only as a SHA-256 digest and content-type summary. If it resembles credential material, MCPSentinel reports `MCP-D001` without writing the response text to disk.
 
 The repository includes a deliberately local-only Docker fixture to verify this boundary end to end. It is excluded from the normal test suite because it needs a running Docker daemon and builds an image:
 
@@ -229,7 +231,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.2.2
+- uses: gentaArnezzi/MCPSentinel@v0.3.0
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -244,7 +246,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.2.2
+- uses: gentaArnezzi/MCPSentinel@v0.3.0
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -263,7 +265,7 @@ export MCPSENTINEL_ALLOWED_HOSTS="mcp.example.com,localhost"
 mcpsentinel-mcp
 ```
 
-The allowlist accepts either `host` or an exact `host:port`. HTTP redirects are refused, each discovery session has a 30-second deadline, and resolved private or reserved addresses are denied by default. For a deliberately trusted local network, set `MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS=true` alongside its exact allowlist entry.
+The allowlist accepts either `host` or an exact `host:port`. HTTP redirects are refused, each discovery session has a 30-second deadline, and private or reserved addresses are denied by default. For public MCP-native HTTP scans, the validated DNS address set is pinned to the HTTP transport while the original hostname remains the HTTP Host and TLS SNI name; this prevents a second DNS lookup from changing a validated public hostname into an internal destination. For a deliberately trusted local network, set `MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS=true` alongside its exact allowlist entry.
 
 Optional operator settings are `MCPSENTINEL_MCP_BASELINE_DIR`, `MCPSENTINEL_RULES_PATH`, `MCPSENTINEL_POLICY_PATH`, `MCPSENTINEL_MCP_JUDGE`, and `MCPSENTINEL_MCP_JUDGE_MODEL`. Set `MCPSENTINEL_ALLOW_STDIO_TARGETS=true` only in a trusted local environment. The MCP caller cannot choose arbitrary policy files, baseline paths, or approve a baseline. For a deliberate one-time approval, an operator can set `MCPSENTINEL_MCP_APPROVE_BASELINE=true`, execute the reviewed scan, then remove the variable.
 
@@ -278,8 +280,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.2.2
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.2.2 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.3.0
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.3.0 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:
@@ -293,7 +295,7 @@ The image intentionally has no Docker socket and cannot run the dynamic layer. R
 
 ## Dataset
 
-[datasets/vulnerable_by_design](datasets/vulnerable_by_design) holds controlled descriptor-level ground truth for regression tests across every default static rule plus a bounded safe control. It contains no live third-party targets or runnable destructive payloads.
+[datasets/vulnerable_by_design](datasets/vulnerable_by_design) holds controlled descriptor-level ground truth for regression tests across every default static rule. It includes safe hard negatives, Unicode/zero-width evasion, metadata/schema variants, and intentionally uncovered controls; it contains no live third-party targets or runnable destructive payloads.
 
 Run a reproducible accuracy and timing measurement with the offline judge:
 
@@ -301,9 +303,9 @@ Run a reproducible accuracy and timing measurement with the offline judge:
 mcpsentinel benchmark datasets/vulnerable_by_design/manifest.json --format json --output benchmark.json
 ```
 
-The benchmark measures both raw static candidates and semantic findings against the dataset's expected reportable rules. It reports precision, recall, false-positive rate, F1, confusion-matrix counts, and stage timings. The bounded-fetch control intentionally counts as a static false positive but a semantic true negative, so regressions in noise suppression are visible in CI or release review.
+The benchmark measures both raw static candidates and semantic findings against the dataset's expected reportable rules. It reports precision, recall, false-positive rate, F1, confusion-matrix counts, stage timings, and a separate breakdown for every attack category. The bounded-fetch control intentionally counts as a static false positive but a semantic true negative, so regressions in noise suppression are visible in CI or release review.
 
-Current evidence is deliberately narrow: the bundled set has 10 synthetic descriptors and 9 built-in rules. With the offline heuristic it currently reports static precision `0.900` and semantic precision `1.000` on that controlled set, by suppressing one bounded-network false positive. This is a regression signal—not a claim about public MCP server accuracy, recall, or superiority over another scanner.
+Current evidence is deliberately narrow: the bundled set has 35 synthetic descriptors and 9 built-in rules. With the offline heuristic it currently reports static precision `0.966`, recall `0.933`, and semantic precision `1.000`, recall `0.933` on that controlled set. The two deliberate misses make current language/field coverage visible; semantic triage suppresses one bounded-network false positive. This is a regression signal—not a claim about public MCP server accuracy, recall, or superiority over another scanner.
 
 For a real-world benchmark, collect only metadata that you are authorized to assess, preserve the source/version and independent reviewer labels, include benign and adversarial examples, freeze the rule and judge configuration, then compare the same labelled corpus against other scanners. Do not turn an unauthorised third-party scan into a vulnerability claim.
 
