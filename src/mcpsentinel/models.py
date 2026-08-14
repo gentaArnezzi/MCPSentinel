@@ -56,6 +56,7 @@ class TargetConfig:
     command: str | None = None
     arguments: tuple[str, ...] = ()
     environment: dict[str, str] = field(default_factory=dict)
+    restrict_to_public_network: bool = False
 
 
 @dataclass(frozen=True)
@@ -132,7 +133,7 @@ class ScanReport:
     started_at: datetime
     completed_at: datetime | None = None
     judge: str = "heuristic"
-    scan_version: str = "0.1.0"
+    scan_version: str = "0.1.1"
     discovery_metadata: dict[str, Any] = field(default_factory=dict)
     dynamic_observations: list[DynamicObservation] = field(default_factory=list)
 

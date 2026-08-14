@@ -3,4 +3,4 @@
 from .models import ScanReport
 
 __all__ = ["ScanReport"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"

@@ -14,6 +14,9 @@ from pydantic import BaseModel, Field
 
 from .models import Category, JudgeVerdict, StaticCandidate, to_primitive
 
+OPENAI_TIMEOUT_SECONDS = 30.0
+OPENAI_MAX_RETRIES = 2
+
 
 class SemanticJudgeError(RuntimeError):
     """The requested semantic provider could not supply a trustworthy verdict."""
@@ -141,7 +144,7 @@ class OpenAIJudge(SemanticJudge):
             raise SemanticJudgeError("--judge openai requires OPENAI_API_KEY in the environment.")
         self.model = model
         self.identity = f"openai:{model}"
-        self._client = OpenAI()
+        self._client = OpenAI(timeout=OPENAI_TIMEOUT_SECONDS, max_retries=OPENAI_MAX_RETRIES)
 
     async def assess(self, candidate: StaticCandidate) -> JudgeVerdict:
         return await asyncio.to_thread(self._assess_sync, candidate)

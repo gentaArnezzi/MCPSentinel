@@ -78,6 +78,8 @@ The risk score is a capped 0–100 weighted sum of severity and semantic confide
 
 `--judge heuristic` is the default and is fully offline. `--judge openai` requires `OPENAI_API_KEY`; `--judge auto` opts into using OpenAI when that key is present, otherwise it uses the heuristic. The OpenAI judge uses the Python SDK's Responses structured-output API, so an API response cannot bypass the scanner's expected verdict schema. Results are cached by descriptor hash and judge identity in the baseline directory to avoid repeat API charges.
 
+Each OpenAI judgement uses a 30-second client deadline and at most two SDK retries. The default heuristic remains the recommended choice when external model latency or metadata transmission is not acceptable.
+
 The semantic threshold defaults to `0.70`. Candidate findings below it are withheld from the report; lower it only when you prefer recall over precision.
 
 ## Custom static rules
@@ -137,8 +139,8 @@ MCPSENTINEL_RUN_DOCKER_TESTS=1 pytest tests/test_dynamic_docker_e2e.py
 The repository root is a composite GitHub Action. It installs MCPSentinel, restores a scoped baseline cache, emits SARIF, and fails at the selected severity. It does not enable dynamic testing.
 
 ```yaml
-- uses: actions/checkout@v4
-- uses: actions/setup-python@v5
+- uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+- uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
   with:
     python-version: "3.12"
 - uses: ./
@@ -148,7 +150,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
     transport: http
     fail-on: high
     policy: .mcpsentinel/policy.json
-- uses: github/codeql-action/upload-sarif@v3
+- uses: github/codeql-action/upload-sarif@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
   with:
     sarif_file: ${{ steps.mcpsentinel.outputs.sarif }}
 ```
@@ -163,6 +165,8 @@ Run `mcpsentinel-mcp` to expose the scanner as the MCP tool `scan_mcp_server` ov
 export MCPSENTINEL_ALLOWED_HOSTS="mcp.example.com,localhost"
 mcpsentinel-mcp
 ```
+
+The allowlist accepts either `host` or an exact `host:port`. HTTP redirects are refused, each discovery session has a 30-second deadline, and resolved private or reserved addresses are denied by default. For a deliberately trusted local network, set `MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS=true` alongside its exact allowlist entry.
 
 Optional operator settings are `MCPSENTINEL_MCP_BASELINE_DIR`, `MCPSENTINEL_RULES_PATH`, `MCPSENTINEL_POLICY_PATH`, `MCPSENTINEL_MCP_JUDGE`, and `MCPSENTINEL_MCP_JUDGE_MODEL`. Set `MCPSENTINEL_ALLOW_STDIO_TARGETS=true` only in a trusted local environment. The MCP caller cannot choose arbitrary policy files or baseline paths.
 
@@ -201,3 +205,7 @@ ruff check .
 ```
 
 The project is intentionally dependency-light: `mcp` handles protocol discovery, while the core rule engine, snapshot store, and report writers use the standard library.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and supported-version information.

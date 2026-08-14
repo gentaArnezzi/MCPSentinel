@@ -23,7 +23,7 @@ mcp = MCPServer(
         "Scan targets only when an operator has configured them in MCPSENTINEL_ALLOWED_HOSTS. "
         "Dynamic execution is intentionally unavailable through this server."
     ),
-    version="0.1.0",
+    version="0.1.1",
 )
 
 
@@ -79,12 +79,20 @@ def _target_from_mcp_request(target: str, transport: str) -> TargetConfig:
             for host in os.environ.get("MCPSENTINEL_ALLOWED_HOSTS", "").split(",")
             if host.strip()
         }
-        if parsed.hostname.lower() not in allowed_hosts:
+        if not _is_authorized_http_target(parsed, allowed_hosts):
             raise ValueError(
                 "Target host is not authorized. Set MCPSENTINEL_ALLOWED_HOSTS "
-                "to an explicit host list."
+                "to an explicit host or host:port list."
             )
-        return TargetConfig(transport="http", identity=target, url=target)
+        return TargetConfig(
+            transport="http",
+            identity=target,
+            url=target,
+            restrict_to_public_network=(
+                os.environ.get("MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS", "").lower()
+                not in _TRUE_VALUES
+            ),
+        )
 
     if os.environ.get("MCPSENTINEL_ALLOW_STDIO_TARGETS", "").lower() not in _TRUE_VALUES:
         raise ValueError(
@@ -105,6 +113,13 @@ def _target_from_mcp_request(target: str, transport: str) -> TargetConfig:
 def _configured_path(variable: str) -> Path | None:
     raw = os.environ.get(variable)
     return Path(raw).expanduser() if raw else None
+
+
+def _is_authorized_http_target(parsed, allowed_hosts: set[str]) -> bool:
+    """Match exact hosts, with an optional exact port in the operator allowlist."""
+    host = parsed.hostname.lower()
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return host in allowed_hosts or f"{host}:{port}" in allowed_hosts
 
 
 def main() -> None:

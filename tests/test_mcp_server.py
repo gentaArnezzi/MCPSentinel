@@ -16,6 +16,28 @@ async def test_mcp_native_server_rejects_unallowlisted_http_targets(monkeypatch)
         await mcp_server.scan_mcp_server("https://untrusted.example/mcp")
 
 
+def test_mcp_native_http_allowlist_supports_explicit_ports(monkeypatch) -> None:
+    monkeypatch.setenv("MCPSENTINEL_ALLOWED_HOSTS", "scanner.example:8443")
+    monkeypatch.delenv("MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS", raising=False)
+
+    target = mcp_server._target_from_mcp_request(
+        "https://scanner.example:8443/mcp", transport="http"
+    )
+
+    assert target.restrict_to_public_network is True
+    with pytest.raises(ValueError, match="not authorized"):
+        mcp_server._target_from_mcp_request("https://scanner.example/mcp", transport="http")
+
+
+def test_mcp_native_can_explicitly_allow_a_trusted_private_network(monkeypatch) -> None:
+    monkeypatch.setenv("MCPSENTINEL_ALLOWED_HOSTS", "localhost")
+    monkeypatch.setenv("MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS", "true")
+
+    target = mcp_server._target_from_mcp_request("http://localhost:8765/mcp", transport="http")
+
+    assert target.restrict_to_public_network is False
+
+
 async def test_mcp_native_stdio_server_exposes_the_scan_tool() -> None:
     parameters = StdioServerParameters(
         command=sys.executable, args=["-m", "mcpsentinel.mcp_server"]

@@ -7,20 +7,27 @@
     "url": "https://github.com/gentaArnezzi/MCPSentinel",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcp-guardian-scan",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "MCPSENTINEL_ALLOWED_HOSTS",
-          "description": "Comma-separated MCP server hostnames that the MCP-native scanner may connect to.",
+          "description": "Comma-separated MCP server hostnames, optionally with an exact port, that the MCP-native scanner may connect to.",
           "isRequired": true,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS",
+          "description": "Set to true only to permit an explicitly allowlisted private or reserved HTTP address in a trusted local network.",
+          "isRequired": false,
           "isSecret": false,
           "format": "string"
         }

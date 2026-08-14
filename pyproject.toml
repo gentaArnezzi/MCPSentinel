@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling>=1.27"]
+requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "mcp-guardian-scan"
-version = "0.1.0"
+version = "0.1.1"
 description = "Precision-first security scanner for Model Context Protocol servers."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Genta" }]
 keywords = ["mcp", "security", "scanner", "llm-security", "sarif"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
@@ -33,7 +33,15 @@ Repository = "https://github.com/gentaArnezzi/MCPSentinel"
 Issues = "https://github.com/gentaArnezzi/MCPSentinel/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.8"]
+build = ["hatchling==1.27.0"]
+dev = [
+  "build>=1.2",
+  "pip-audit>=2.9",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.8",
+  "twine>=6.1",
+]
 
 [project.scripts]
 mcpsentinel = "mcpsentinel.cli:main"
