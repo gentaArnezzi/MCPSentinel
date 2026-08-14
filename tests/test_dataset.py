@@ -45,3 +45,7 @@ def test_registry_metadata_is_concrete_and_valid_json() -> None:
     assert "<!-- mcp-name: io.github.gentaArnezzi/mcpsentinel -->" in (
         root / "README.md"
     ).read_text()
+    workflow = (root / ".github" / "workflows" / "publish.yml").read_text()
+    assert "id-token: write" in workflow
+    assert "name: pypi" in workflow
+    assert "./mcp-publisher publish registry/server.json" in workflow
