@@ -95,3 +95,25 @@ async def test_public_metadata_negative_control_reports_only_false_positive_rate
     assert payload["static"]["precision"] is None
     assert payload["static"]["recall"] is None
     assert payload["static"]["false_positive_rate"] == 0.0
+
+
+async def test_authorized_positive_control_is_source_attributed_and_detected() -> None:
+    dataset = (
+        Path(__file__).parents[1]
+        / "datasets"
+        / "authorized_positive_metadata_v3"
+        / "manifest.json"
+    )
+
+    report = await run_benchmark(dataset, HeuristicJudge(), semantic_threshold=0.70)
+
+    assert report.dataset_version == 3
+    assert report.evaluation_scope == "authorized-metadata-positive-control"
+    assert report.case_count == 16
+    assert report.labeled_positive_count == 18
+    assert report.source_count == 1
+    assert report.static.true_positive == 18
+    assert report.static.false_positive == 0
+    assert report.semantic.true_positive == 18
+    assert report.semantic.false_positive == 0
+    assert "scope: authorized-metadata-positive-control" in benchmark_text(report)

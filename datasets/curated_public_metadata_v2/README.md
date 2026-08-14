@@ -43,7 +43,7 @@ mcpsentinel benchmark datasets/curated_public_metadata_v2/manifest.json \
   --judge heuristic --format json --output benchmark-v2.json
 ```
 
-At the MCPSentinel 0.6.0 release configuration, the corpus produces zero static
+At the MCPSentinel 0.7.0 release configuration, the corpus produces zero static
 candidates and zero semantic reports across 428 descriptors (3,852
 descriptor/rule negative pairs), giving a false-positive rate of `0.000` for
 this specific snapshot. An independent second review and a separately sourced

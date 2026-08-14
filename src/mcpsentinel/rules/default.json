@@ -7,6 +7,8 @@
     "description": "Metadata asks the model to override instructions or conceal behavior.",
     "patterns": [
       "ignore (?:all |any |the )?(?:previous|prior|system) instructions",
+      "(?:ignore|bypass|disable|skip|override).{0,100}(?:previous|prior|safety|security|content|validation|access controls?|restrictions?|assistant instructions?)",
+      "act as\\s*:\\s*[^.]{0,80}(?:root|unrestricted|full privileges|full system access|elevated privileges)",
       "(?:do not|don't) (?:tell|inform|alert) (?:the )?user",
       "(?:reveal|exfiltrate|send).{0,80}(?:system prompt|conversation history)"
     ],
@@ -44,7 +46,13 @@
     "description": "Metadata advertises execution of arbitrary or user-provided shell commands/scripts.",
     "patterns": [
       "(?:execute|run|invoke).{0,100}(?:arbitrary|any|user[- ]?(?:supplied|provided)).{0,80}(?:shell|command|script|powershell|bash)",
-      "(?:arbitrary|any|user[- ]?(?:supplied|provided)).{0,80}(?:shell|command|script|powershell|bash).{0,100}(?:execute|run|invoke)"
+      "(?:arbitrary|any|user[- ]?(?:supplied|provided)).{0,80}(?:shell|command|script|powershell|bash).{0,100}(?:execute|run|invoke)",
+      "(?:run|execute).{0,100}(?:base64|obfuscat).{0,80}(?:script|code)",
+      "(?:compile|evaluate).{0,100}(?:code|expression).{0,100}(?:eval|builtins?)",
+      "(?:create|execute).{0,100}(?:lambda).{0,100}(?:dynamic(?:ally)?)",
+      "(?:execute).{0,100}(?:system|shell).{0,80}(?:commands?).{0,160}(?:root|unrestricted|full)",
+      "(?:module|plugin).{0,100}(?:arbitrary|any|user[- ]?(?:supplied|provided)).{0,80}(?:path|file)",
+      "(?:evaluate).{0,80}(?:expression).{0,100}(?:builtins?|full access)"
     ],
     "fields": ["description", "schema"]
   },

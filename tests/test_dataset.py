@@ -91,3 +91,48 @@ def test_curated_public_metadata_dataset_has_pinned_sources_and_literal_cases() 
         assert len(case["source"]["sha256"]) == 64
         source_counts[case["source"]["source_id"]] += 1
     assert source_counts == {"aws": 329, "github": 99}
+
+
+def test_authorized_positive_dataset_has_pinned_source_and_authorized_labels() -> None:
+    root = Path(__file__).parents[1]
+    manifest = json.loads(
+        (root / "datasets" / "authorized_positive_metadata_v3" / "manifest.json").read_text()
+    )
+
+    assert manifest["version"] == 3
+    assert manifest["evaluation_scope"] == "authorized-metadata-positive-control"
+    assert len(manifest["cases"]) == 16
+    assert manifest["labeling"]["reviewer_count"] == 1
+    assert manifest["labeling"]["review_status"] == (
+        "maintainer-reviewed; independent-review-pending"
+    )
+    assert manifest["sources"] == [
+        {
+            "id": "cisco",
+            "repository": "https://github.com/cisco-ai-defense/mcp-scanner",
+            "commit": "893327c54d223ea07296f68f32d8294f5c045f4a",
+            "license": "Apache-2.0",
+            "license_path": "LICENSE",
+            "authorization": (
+                "Apache-2.0 licensed test/evaluation fixtures published by Cisco; selected "
+                "directories carry Cisco-authored malicious scenario labels."
+            ),
+            "extraction": (
+                "Full docstring of the one @app.tool function in each selected "
+                "behavioral-analysis fixture."
+            ),
+            "case_count": 16,
+        }
+    ]
+
+    for case in manifest["cases"]:
+        assert case["provenance"] == "source-attributed-authorized-positive-control"
+        assert case["expected_rules"]
+        assert case["expected_rules"] == case["expected_reported_rules"]
+        assert case["source"]["source_id"] == "cisco"
+        assert case["source"]["source_label"] in {
+            "prompt-injection",
+            "unauthorized-code-execution",
+        }
+        assert case["source"]["line"] > 0
+        assert len(case["source"]["sha256"]) == 64

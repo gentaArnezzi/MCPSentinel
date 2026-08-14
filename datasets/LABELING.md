@@ -17,6 +17,14 @@ case. Its public-metadata-negative-control rubric labels ordinary documented
 tools with no unbounded-risk rule. This does **not** say that a source tool is
 safe in every deployment or that a source project has been security audited.
 
+`authorized_positive_metadata_v3` is separately versioned and uses only
+licensed, intentionally malicious fixtures where the full advertised tool
+docstring exposes the labelled risk. Its source scenario labels are preserved
+alongside MCPSentinel's rule mapping. It is a calibration regression control,
+not a held-out evaluation: any pattern updated from it must also be checked
+against v1 and the v2 public negative control. The independent-review protocol
+lives in `authorized_positive_metadata_v3/INDEPENDENT_REVIEW.md`.
+
 The benchmark prints these counts. A case matrix must declare `expected_count`;
 the runner rejects it when the dimensions expand to a different number of
 cases. This makes it possible to audit exactly what produced a metric from a
@@ -50,7 +58,8 @@ pytest tests/test_dataset.py tests/test_benchmark.py
 ```
 
 Record any metric change in the release notes or pull request. To make a
-real-world claim, use a separately versioned, authorized corpus with source
-versions and independent reviewer labels, then run each scanner with frozen
-configuration against that same corpus. Do not infer public-server accuracy
-from either the bundled synthetic set or the single-review v2 negative control.
+real-world claim, use a separately versioned, authorized **held-out** corpus
+with source versions and independent reviewer labels, then run each scanner
+with frozen configuration against that same corpus. Do not infer public-server
+accuracy from the bundled synthetic set, the single-review v2 negative control,
+or the v3 calibration corpus.

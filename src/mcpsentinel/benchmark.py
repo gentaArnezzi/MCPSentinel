@@ -181,17 +181,21 @@ def _dataset_metadata(manifest: dict[str, Any]) -> BenchmarkDatasetMetadata:
             evaluation_scope="controlled-synthetic-regression",
             source_count=0,
         )
-    if version != 2:
+    if version not in {2, 3}:
         raise BenchmarkConfigurationError(f"Unsupported benchmark dataset version {version}.")
 
     evaluation_scope = manifest.get("evaluation_scope")
-    if evaluation_scope != "public-metadata-negative-control":
+    scopes = {
+        2: "public-metadata-negative-control",
+        3: "authorized-metadata-positive-control",
+    }
+    if evaluation_scope != scopes[version]:
         raise BenchmarkConfigurationError(
-            "Version 2 benchmark datasets require the public-metadata-negative-control scope."
+            f"Version {version} benchmark datasets require the {scopes[version]} scope."
         )
     if manifest.get("case_matrices", []):
         raise BenchmarkConfigurationError(
-            "Version 2 public-metadata datasets must contain literal source-attributed cases, "
+            f"Version {version} source-attributed datasets must contain literal cases, "
             "not generated case matrices."
         )
     labeling = manifest.get("labeling")
@@ -200,24 +204,29 @@ def _dataset_metadata(manifest: dict[str, Any]) -> BenchmarkDatasetMetadata:
         for field in ("rubric", "review_status")
     ):
         raise BenchmarkConfigurationError(
-            "Version 2 benchmark datasets require non-empty labeling rubric and review status."
+            f"Version {version} benchmark datasets require non-empty labeling rubric and review "
+            "status."
         )
     if not isinstance(labeling.get("reviewer_count"), int) or labeling["reviewer_count"] < 1:
         raise BenchmarkConfigurationError(
-            "Version 2 benchmark datasets require a positive labeling reviewer_count."
+            f"Version {version} benchmark datasets require a positive labeling reviewer_count."
         )
 
     sources = manifest.get("sources")
     if not isinstance(sources, list) or not sources:
-        raise BenchmarkConfigurationError("Version 2 benchmark datasets require source records.")
+        raise BenchmarkConfigurationError(
+            f"Version {version} benchmark datasets require source records."
+        )
     source_ids: set[str] = set()
     for source in sources:
         if not isinstance(source, dict):
-            raise BenchmarkConfigurationError("Every Version 2 source record must be an object.")
+            raise BenchmarkConfigurationError(
+                f"Every Version {version} source record must be an object."
+            )
         source_id = source.get("id")
         if not isinstance(source_id, str) or not source_id or source_id in source_ids:
             raise BenchmarkConfigurationError(
-                "Version 2 source IDs must be unique non-empty strings."
+                f"Version {version} source IDs must be unique non-empty strings."
             )
         source_ids.add(source_id)
         if not all(
@@ -225,46 +234,83 @@ def _dataset_metadata(manifest: dict[str, Any]) -> BenchmarkDatasetMetadata:
             for field in ("repository", "license", "license_path", "extraction")
         ):
             raise BenchmarkConfigurationError(
-                f"Version 2 source {source_id!r} has incomplete provenance metadata."
+                f"Version {version} source {source_id!r} has incomplete provenance metadata."
             )
         commit = source.get("commit")
         if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise BenchmarkConfigurationError(
-                f"Version 2 source {source_id!r} must pin a full Git commit SHA."
+                f"Version {version} source {source_id!r} must pin a full Git commit SHA."
             )
         if not isinstance(source.get("case_count"), int) or source["case_count"] < 1:
             raise BenchmarkConfigurationError(
-                f"Version 2 source {source_id!r} needs a positive case_count."
+                f"Version {version} source {source_id!r} needs a positive case_count."
+        )
+        if version == 3 and (
+            not isinstance(source.get("authorization"), str) or not source["authorization"]
+        ):
+            raise BenchmarkConfigurationError(
+                f"Version 3 source {source_id!r} requires an authorization statement."
             )
 
     cases = manifest.get("cases", [])
     if not isinstance(cases, list) or not cases:
-        raise BenchmarkConfigurationError("Version 2 benchmark datasets require literal cases.")
+        raise BenchmarkConfigurationError(
+            f"Version {version} benchmark datasets require literal cases."
+        )
     source_case_counts = {source["id"]: 0 for source in sources}
     for case in cases:
         if not isinstance(case, dict):
-            raise BenchmarkConfigurationError("Every Version 2 benchmark case must be an object.")
-        if case.get("provenance") != "source-attributed-public-metadata":
             raise BenchmarkConfigurationError(
-                "Version 2 cases must use source-attributed-public-metadata provenance."
+                f"Every Version {version} benchmark case must be an object."
             )
-        if case.get("expected_rules") or case.get("expected_reported_rules"):
+        provenance = {
+            2: "source-attributed-public-metadata",
+            3: "source-attributed-authorized-positive-control",
+        }[version]
+        if case.get("provenance") != provenance:
+            raise BenchmarkConfigurationError(
+                f"Version {version} cases must use {provenance} provenance."
+            )
+        expected_rules = case.get("expected_rules")
+        expected_reported_rules = case.get("expected_reported_rules")
+        if version == 2 and (expected_rules or expected_reported_rules):
             raise BenchmarkConfigurationError(
                 "Public-metadata negative-control cases must not label ordinary tool metadata "
                 "as an unbounded-risk finding."
             )
+        if version == 3 and (
+            not isinstance(expected_rules, list)
+            or not expected_rules
+            or not isinstance(expected_reported_rules, list)
+            or not expected_reported_rules
+        ):
+            raise BenchmarkConfigurationError(
+                "Authorized positive-control cases require non-empty expected rule labels."
+            )
         source = case.get("source")
         if not isinstance(source, dict) or source.get("source_id") not in source_case_counts:
             raise BenchmarkConfigurationError(
-                "Version 2 cases must name a declared source record."
+                f"Version {version} cases must name a declared source record."
             )
         if not isinstance(source.get("path"), str) or not source["path"]:
-            raise BenchmarkConfigurationError("Version 2 cases require a non-empty source path.")
+            raise BenchmarkConfigurationError(
+                f"Version {version} cases require a non-empty source path."
+            )
         if not isinstance(source.get("line"), int) or source["line"] < 1:
-            raise BenchmarkConfigurationError("Version 2 cases require a positive source line.")
+            raise BenchmarkConfigurationError(
+                f"Version {version} cases require a positive source line."
+            )
         digest = source.get("sha256")
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise BenchmarkConfigurationError("Version 2 cases require a source-file SHA-256.")
+            raise BenchmarkConfigurationError(
+                f"Version {version} cases require a source-file SHA-256."
+            )
+        if version == 3 and (
+            not isinstance(source.get("source_label"), str) or not source["source_label"]
+        ):
+            raise BenchmarkConfigurationError(
+                "Authorized positive-control cases require a source-authored label."
+            )
         source_case_counts[source["source_id"]] += 1
     for source in sources:
         if source_case_counts[source["id"]] != source["case_count"]:
