@@ -136,7 +136,7 @@ class ScanReport:
     started_at: datetime
     completed_at: datetime | None = None
     judge: str = "heuristic"
-    scan_version: str = "0.5.0"
+    scan_version: str = "0.5.1"
     discovery_metadata: dict[str, Any] = field(default_factory=dict)
     dynamic_observations: list[DynamicObservation] = field(default_factory=list)
     baseline_state: str = "not_checked"

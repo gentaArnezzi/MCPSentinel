@@ -43,7 +43,7 @@ $ mcpsentinel
 |                     Read-only by default                       |
 +----------------------------------------------------------------+
 
-Welcome to MCPSentinel 0.5.0
+Welcome to MCPSentinel 0.5.1
 
 1. Run your first offline scan:
    mcpsentinel scan http://localhost:8000/mcp
@@ -229,11 +229,11 @@ MCPSENTINEL_RUN_DOCKER_TESTS=1 pytest tests/test_dynamic_docker_e2e.py
 The repository root is a composite GitHub Action. It installs MCPSentinel, restores a scoped baseline cache, emits SARIF, and fails at the selected severity. It does not enable dynamic testing. Reference a release tag from another repository; pinning a full commit SHA is recommended for stricter supply-chain controls.
 
 ```yaml
-- uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-- uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+- uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.5.0
+- uses: gentaArnezzi/MCPSentinel@v0.5.1
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -248,7 +248,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.5.0
+- uses: gentaArnezzi/MCPSentinel@v0.5.1
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -282,8 +282,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.5.0
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.5.0 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.5.1
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.5.1 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:
