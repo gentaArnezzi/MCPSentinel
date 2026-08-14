@@ -11,6 +11,10 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+
 from . import __version__
 from .benchmark import BenchmarkConfigurationError, benchmark_json, benchmark_text, run_benchmark
 from .discovery import DiscoveryError
@@ -26,6 +30,14 @@ _ONBOARDING_BANNER = """+-------------------------------------------------------
 |                     Read-only by default                       |
 +----------------------------------------------------------------+
 """
+
+_STDIO_EXECUTION_WARNING = (
+    "MCPSentinel must start this MCP server process to inspect its metadata.\n\n"
+    "The process is NOT sandboxed and may access filesystem and network resources "
+    "available to your operating-system user. Environment credentials are withheld by "
+    "default, but host execution is still a trust boundary.\n\n"
+    "Only scan stdio executables you trust to start locally."
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -277,6 +289,14 @@ async def _run_scan(args: argparse.Namespace) -> int:
     if args.approve_baseline and args.no_baseline_update:
         raise ValueError("--approve-baseline cannot be combined with --no-baseline-update.")
     target = _target_from_args(args)
+    if target.transport == "stdio" and args.format == "text" and sys.stdout.isatty():
+        Console().print(
+            Panel(
+                Text(_STDIO_EXECUTION_WARNING),
+                title="[bold yellow]⚠ Stdio target execution[/bold yellow]",
+                border_style="yellow",
+            )
+        )
     report = await scan(
         target,
         rules_path=args.rules,

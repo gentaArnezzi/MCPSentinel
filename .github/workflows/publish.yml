@@ -20,6 +20,12 @@ jobs:
       - run: MCPSENTINEL_RUN_DOCKER_TESTS=1 uv run pytest -q
       - run: uv run pip check
       - run: uv run pip-audit --requirement requirements.lock --strict --disable-pip
+      - name: Verify CLI runtime version
+        shell: bash
+        run: |
+          project_version="$(python -c 'import tomllib; from pathlib import Path; print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])')"
+          runtime_version="$(uv run mcpsentinel --version | awk '{print $2}')"
+          test "$runtime_version" = "$project_version"
       - run: uv build
       - run: uv run twine check dist/*
       - run: docker build --tag mcpsentinel:release-check .

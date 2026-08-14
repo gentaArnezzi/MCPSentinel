@@ -11,7 +11,8 @@ from mcp import types
 from mcp.server import MCPServer
 
 from . import __version__
-from .models import TargetConfig, to_primitive
+from .models import TargetConfig
+from .safety import safe_report_payload
 from .service import scan
 
 _TRUE_VALUES = {"1", "true", "yes"}
@@ -61,7 +62,7 @@ async def scan_mcp_server(
         judge_model=os.environ.get("MCPSENTINEL_MCP_JUDGE_MODEL", "gpt-4o-mini"),
         semantic_threshold=0.70,
     )
-    return to_primitive(report)
+    return safe_report_payload(report)
 
 
 def _target_from_mcp_request(target: str, transport: str) -> TargetConfig:

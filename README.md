@@ -43,7 +43,7 @@ $ mcpsentinel
 |                     Read-only by default                       |
 +----------------------------------------------------------------+
 
-Welcome to MCPSentinel 0.8.1
+Welcome to MCPSentinel 0.8.2
 
 1. Run your first offline scan:
    mcpsentinel scan http://localhost:8000/mcp
@@ -139,6 +139,15 @@ only the execution path and locale—not `OPENAI_API_KEY`, cloud credentials,
 server needs with `--env KEY=VALUE`; reports and snapshots show the key but
 never the value. `--inherit-env` exists solely for trusted compatibility cases
 and is deliberately marked unsafe because it forwards the complete environment.
+
+**Read-only does not mean sandboxed.** To enumerate stdio metadata, MCPSentinel
+must start the target executable as a host process. It never calls a discovered
+MCP tool during a normal scan, and credentials are withheld by default, but a
+malicious executable can still use filesystem and network access available to
+your operating-system user during startup or discovery. Scan only stdio
+executables you trust to launch locally. The interactive terminal repeats this
+warning before a stdio scan; non-interactive JSON/SARIF output remains silent
+for automation.
 
 Useful options:
 
@@ -240,7 +249,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.8.1
+- uses: gentaArnezzi/MCPSentinel@v0.8.2
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -255,7 +264,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.8.1
+- uses: gentaArnezzi/MCPSentinel@v0.8.2
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -267,7 +276,7 @@ Set `OPENAI_API_KEY` in the workflow only when choosing `judge: openai` or `auto
 
 ## MCP-native scanner
 
-Run `mcpsentinel-mcp` to expose the scanner as the MCP tool `scan_mcp_server` over stdio. It is intentionally more constrained than the CLI: dynamic execution is unavailable, target configuration is operator-controlled, HTTP targets must be explicitly allowlisted, and stdio targets are disabled unless the operator enables them.
+Run `mcpsentinel-mcp` to expose the scanner as the MCP tool `scan_mcp_server` over stdio. It is intentionally more constrained than the CLI: dynamic execution is unavailable, target configuration is operator-controlled, HTTP targets must be explicitly allowlisted, and stdio targets are disabled unless the operator enables them. Its structured response uses the same credential-safe serialization as JSON and HTML reports.
 
 ```bash
 export MCPSENTINEL_ALLOWED_HOSTS="mcp.example.com,localhost"
@@ -289,8 +298,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.1
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.1 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.2
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.2 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:

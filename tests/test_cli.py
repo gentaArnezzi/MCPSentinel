@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from importlib.metadata import version
+
 from mcpsentinel import __version__
 from mcpsentinel.cli import main
 
@@ -39,6 +41,10 @@ def test_init_alias_and_version_are_available(capsys) -> None:
     else:
         raise AssertionError("--version must exit after rendering its version")
     assert capsys.readouterr().out == f"mcpsentinel {__version__}\n"
+
+
+def test_runtime_version_matches_installed_distribution() -> None:
+    assert __version__ == version("mcp-guardian-scan")
 
 
 def test_onboard_detects_but_never_echoes_an_openai_key(capsys, monkeypatch) -> None:

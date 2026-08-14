@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime
 
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from mcpsentinel import mcp_server
+from mcpsentinel.models import ScanReport
 
 
 async def test_mcp_native_server_rejects_unallowlisted_http_targets(monkeypatch) -> None:
@@ -14,6 +16,26 @@ async def test_mcp_native_server_rejects_unallowlisted_http_targets(monkeypatch)
 
     with pytest.raises(ValueError, match="not authorized"):
         await mcp_server.scan_mcp_server("https://untrusted.example/mcp")
+
+
+async def test_mcp_native_response_redacts_http_userinfo(monkeypatch) -> None:
+    monkeypatch.setenv("MCPSENTINEL_ALLOWED_HOSTS", "example.com")
+
+    async def fake_scan(target, **_: object) -> ScanReport:
+        return ScanReport(
+            target=target,
+            descriptors=[],
+            findings=[],
+            started_at=datetime.now(UTC),
+        )
+
+    monkeypatch.setattr(mcp_server, "scan", fake_scan)
+    result = await mcp_server.scan_mcp_server(
+        "https://operator:super-secret@example.com/mcp", "http"
+    )
+
+    assert result["target"]["identity"] == "https://example.com/mcp"
+    assert "super-secret" not in str(result)
 
 
 def test_mcp_native_http_allowlist_supports_explicit_ports(monkeypatch) -> None:
