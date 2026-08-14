@@ -18,6 +18,16 @@ def test_first_run_displays_safe_onboarding(capsys) -> None:
     assert "never commit API keys" in output
 
 
+def test_onboarding_can_force_colored_terminal_ui(capsys) -> None:
+    assert main(["--color", "always"]) == 0
+
+    output = capsys.readouterr().out
+    assert "\x1b[" in output
+    assert "Start here:" in output
+    assert "CI-ready command" in output
+    assert "mcpsentinel scan http://localhost:8000/mcp" in output
+
+
 def test_onboard_tailors_a_stdio_command_without_scanning(capsys) -> None:
     assert (
         main(

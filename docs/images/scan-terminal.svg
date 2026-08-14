@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120" role="img" aria-labelledby="title desc">
+  <title id="title">MCPSentinel detects suspicious MCP metadata</title>
+  <desc id="desc">A MCPSentinel terminal scan of the safe local integration-test fixture showing three findings and the stdio trust-boundary warning.</desc>
+  <rect width="1600" height="1120" fill="#0d1117"/>
+  <rect x="40" y="36" width="1520" height="1048" rx="18" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+  <path d="M58 106h1484" stroke="#30363d" stroke-width="2"/>
+  <circle cx="82" cy="71" r="10" fill="#ff5f57"/><circle cx="114" cy="71" r="10" fill="#febc2e"/><circle cx="146" cy="71" r="10" fill="#28c840"/>
+  <text x="800" y="78" fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="20" text-anchor="middle">MCPSentinel — local MCP metadata scan</text>
+  <g font-family="Menlo,Monaco,Consolas,monospace" font-size="19" xml:space="preserve">
+    <text x="88" y="154" fill="#7ee787">$</text><text x="112" y="154" fill="#e6edf3"> mcpsentinel scan "uv run python tests/fixture_stdio_server.py" --transport stdio</text>
+  </g>
+  <rect x="78" y="184" width="1444" height="176" rx="12" fill="#2d2110" stroke="#d29922" stroke-width="2"/>
+  <g font-family="Menlo,Monaco,Consolas,monospace" font-size="18">
+    <text x="108" y="219" fill="#e3b341">⚠  Stdio target execution</text>
+    <text x="108" y="253" fill="#e6edf3">MCPSentinel must start this MCP server process to inspect its metadata.</text>
+    <text x="108" y="286" fill="#c9d1d9">The process is NOT sandboxed; credentials are withheld by default, but host execution</text>
+    <text x="108" y="314" fill="#c9d1d9">remains a trust boundary. Only scan stdio executables you trust to start locally.</text>
+  </g>
+  <rect x="78" y="388" width="690" height="130" rx="12" fill="#1f2a37" stroke="#388bfd" stroke-width="2"/>
+  <g font-family="Menlo,Monaco,Consolas,monospace" font-size="19">
+    <text x="108" y="426" fill="#79c0ff">MCPSentinel  •  MCP Security Scanner</text>
+    <text x="108" y="458" fill="#e6edf3">2 descriptors  •  heuristic-v2</text>
+    <text x="108" y="490" fill="#8b949e">Read-only metadata discovery</text>
+  </g>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <text x="814" y="426" fill="#8b949e" font-size="18">Baseline</text><text x="968" y="426" fill="#e6edf3" font-size="20">missing</text>
+    <text x="814" y="462" fill="#8b949e" font-size="18">Risk score</text><text x="968" y="462" fill="#ff7b72" font-size="20" font-weight="700">100/100 · critical</text>
+    <text x="814" y="498" fill="#8b949e" font-size="18">Findings</text><text x="968" y="498" fill="#e6edf3" font-size="20">1 critical · 2 high</text>
+  </g>
+  <text x="88" y="582" fill="#e6edf3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="25" font-weight="700">Findings</text>
+  <rect x="78" y="604" width="1444" height="60" rx="8" fill="#21262d"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="17" font-weight="700" fill="#8b949e">
+    <text x="104" y="641">SEVERITY</text><text x="302" y="641">SUBJECT</text><text x="560" y="641">FINDING</text><text x="1342" y="641">CONFIDENCE</text>
+  </g>
+  <path d="M78 746h1444M78 834h1444M78 922h1444" stroke="#30363d" stroke-width="1"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <text x="104" y="706" fill="#ff7b72" font-size="18" font-weight="700">CRITICAL</text><text x="302" y="706" fill="#e6edf3" font-size="18">system_export</text><text x="560" y="706" fill="#e6edf3" font-size="18" font-weight="700">MCP002 · Potential credential exfiltration</text><text x="1342" y="706" fill="#e6edf3" font-size="18">97%</text>
+    <text x="560" y="731" fill="#8b949e" font-size="16">Outbound transfer language combined with secret or credential sources.</text>
+    <text x="104" y="794" fill="#d29922" font-size="18" font-weight="700">HIGH</text><text x="302" y="794" fill="#e6edf3" font-size="18">system_export</text><text x="560" y="794" fill="#e6edf3" font-size="18" font-weight="700">MCP001 · Prompt-injection directive in MCP metadata</text><text x="1342" y="794" fill="#e6edf3" font-size="18">97%</text>
+    <text x="560" y="819" fill="#8b949e" font-size="16">Metadata asks the model to override instructions or conceal behavior.</text>
+    <text x="104" y="882" fill="#d29922" font-size="18" font-weight="700">HIGH</text><text x="302" y="882" fill="#e6edf3" font-size="18">background_worker</text><text x="560" y="882" fill="#e6edf3" font-size="18" font-weight="700">MCP004 · Unbounded command execution</text><text x="1342" y="882" fill="#e6edf3" font-size="18">78%</text>
+    <text x="560" y="907" fill="#8b949e" font-size="16">Metadata advertises execution of arbitrary or user-provided shell commands.</text>
+  </g>
+  <rect x="78" y="956" width="1444" height="86" rx="10" fill="#1c2128" stroke="#30363d"/>
+  <text x="108" y="992" fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="17">NOTE</text>
+  <text x="108" y="1022" fill="#c9d1d9" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="18">No approved baseline exists. Review this scan, then rerun with --approve-baseline to create one.</text>
+</svg>

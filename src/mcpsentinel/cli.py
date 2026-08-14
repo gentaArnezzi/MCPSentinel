@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
 from . import __version__
@@ -46,6 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Precision-first security scanning for Model Context Protocol servers.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--color",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="Terminal color mode; auto uses color only for an interactive terminal.",
+    )
     commands = parser.add_subparsers(dest="command_name")
     onboarding_parser = commands.add_parser(
         "onboard",
@@ -201,8 +208,8 @@ def _positive_seconds(raw: str) -> int:
     return value
 
 
-def _onboarding_text(target: str | None = None, transport: str = "auto") -> str:
-    """Return a copy-pasteable, no-write first-run guide for terminal users."""
+def _onboarding_details(target: str | None = None, transport: str = "auto") -> tuple[str, str]:
+    """Return the tailored first scan and privacy-preserving semantic-review hint."""
     if target:
         chosen_transport = transport
         if chosen_transport == "auto":
@@ -216,6 +223,12 @@ def _onboarding_text(target: str | None = None, transport: str = "auto") -> str:
         if os.environ.get("OPENAI_API_KEY")
         else "No OpenAI key is needed for this first scan; the default heuristic judge is offline."
     )
+    return first_scan, openai_hint
+
+
+def _onboarding_text(target: str | None = None, transport: str = "auto") -> str:
+    """Return a copy-pasteable plain-text first-run guide for redirected output."""
+    first_scan, openai_hint = _onboarding_details(target, transport)
     return f"""{_ONBOARDING_BANNER}
 Welcome to MCPSentinel {__version__}
 
@@ -247,6 +260,83 @@ Useful next commands:
 Security note: never commit API keys. Keep --dynamic disabled unless you own
 the target and intentionally provide its local Docker image.
 """
+
+
+def _console(color: str) -> Console:
+    """Create a console whose color policy matches the explicit CLI contract."""
+    return Console(
+        force_terminal=True if color == "always" else None,
+        color_system="standard" if color == "always" else "auto",
+        no_color=color == "never",
+    )
+
+
+def _print_onboarding(target: str | None, transport: str, color: str) -> None:
+    """Show a small, actionable Rich walkthrough to interactive developers."""
+    if color != "always" and not sys.stdout.isatty():
+        print(_onboarding_text(target, transport), end="")
+        return
+
+    first_scan, openai_hint = _onboarding_details(target, transport)
+    console = _console(color)
+    banner = Text(justify="center")
+    banner.append("MCPSENTINEL\n", style="bold cyan")
+    banner.append("Security review for Model Context Protocol servers\n", style="bold")
+    banner.append("Read-only by default", style="dim")
+    console.print(
+        Panel.fit(
+            banner,
+            title=f"[bold cyan]Welcome to MCPSentinel {__version__}[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 4),
+        )
+    )
+    console.print(
+        "[bold]Start here:[/] "
+        "[dim]no API key, configuration file, or server tool call is needed.[/]"
+    )
+    console.print(
+        Panel(
+            Text(first_scan, style="bold cyan", overflow="fold"),
+            title="[bold cyan]1. Scan an MCP server[/bold cyan]",
+            subtitle="[dim]offline heuristic by default[/dim]",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+    )
+
+    next_steps = Table.grid(padding=(0, 1), expand=False)
+    next_steps.add_column(style="bold cyan", no_wrap=True)
+    next_steps.add_column()
+    next_steps.add_row(
+        "2.", "Review findings, then explicitly approve a baseline only when you trust it."
+    )
+    next_steps.add_row("3.", "Use SARIF when you are ready to add the same review gate to CI.")
+    console.print(next_steps)
+    console.print(
+        Panel(
+            Text(
+                f"{first_scan} --format sarif --output results.sarif --fail-on high",
+                style="bold green",
+                overflow="fold",
+            ),
+            title="[bold green]CI-ready command[/bold green]",
+            border_style="green",
+            padding=(1, 2),
+        )
+    )
+    console.print(
+        Panel(
+            Text(openai_hint, overflow="fold"),
+            title="[bold yellow]Optional semantic review[/bold yellow]",
+            border_style="yellow",
+            padding=(0, 2),
+        )
+    )
+    console.print(
+        "[dim]Need help?[/] [bold cyan]mcpsentinel scan --help[/]  "
+        "[dim]•[/]  [bold cyan]mcpsentinel onboard --target <target>[/]"
+    )
 
 
 def _target_from_args(args: argparse.Namespace) -> TargetConfig:
@@ -289,8 +379,11 @@ async def _run_scan(args: argparse.Namespace) -> int:
     if args.approve_baseline and args.no_baseline_update:
         raise ValueError("--approve-baseline cannot be combined with --no-baseline-update.")
     target = _target_from_args(args)
-    if target.transport == "stdio" and args.format == "text" and sys.stdout.isatty():
-        Console().print(
+    rich_text_output = args.format == "text" and (sys.stdout.isatty() or args.color == "always")
+    console = _console(args.color) if rich_text_output else None
+    if target.transport == "stdio" and rich_text_output:
+        assert console is not None
+        console.print(
             Panel(
                 Text(_STDIO_EXECUTION_WARNING),
                 title="[bold yellow]⚠ Stdio target execution[/bold yellow]",
@@ -308,10 +401,10 @@ async def _run_scan(args: argparse.Namespace) -> int:
         semantic_threshold=args.semantic_threshold,
         dynamic_config=_dynamic_from_args(args),
     )
-    if args.format == "text" and sys.stdout.isatty():
+    if rich_text_output:
         if args.output is not None:
             write_report(report, args.format, args.output)
-        terminal_report(report)
+        terminal_report(report, console=console)
     else:
         rendered = write_report(report, args.format, args.output)
         print(rendered, end="")
@@ -370,10 +463,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command_name is None:
-        print(_onboarding_text(), end="")
+        _print_onboarding(None, "auto", args.color)
         return 0
     if args.command_name in {"onboard", "init"}:
-        print(_onboarding_text(args.target, args.transport), end="")
+        _print_onboarding(args.target, args.transport, args.color)
         return 0
     try:
         runner = _run_scan if args.command_name == "scan" else _run_benchmark
