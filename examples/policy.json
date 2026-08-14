@@ -1,0 +1,16 @@
+{
+  "allow": [
+    {
+      "rule_id": "MCP003",
+      "subject_pattern": "^controlled_document_fetch$"
+    }
+  ],
+  "deny": [
+    "MCP002",
+    {
+      "rule_id": "MCP004",
+      "subject_pattern": "^legacy_admin_command$"
+    }
+  ],
+  "semantic_threshold": 0.75
+}

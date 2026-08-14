@@ -1,0 +1,11 @@
+.git
+.venv
+.mcpsentinel
+__pycache__
+.pytest_cache
+.ruff_cache
+tests
+datasets
+dist
+build
+*.egg-info

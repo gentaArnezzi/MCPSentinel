@@ -1,0 +1,111 @@
+[
+  {
+    "id": "MCP001",
+    "title": "Prompt-injection directive in MCP metadata",
+    "category": "prompt_injection",
+    "severity": "high",
+    "description": "Metadata asks the model to override instructions or conceal behavior.",
+    "patterns": [
+      "ignore (?:all |any |the )?(?:previous|prior|system) instructions",
+      "(?:do not|don't) (?:tell|inform|alert) (?:the )?user",
+      "(?:reveal|exfiltrate|send).{0,80}(?:system prompt|conversation history)"
+    ],
+    "fields": ["description", "metadata"]
+  },
+  {
+    "id": "MCP002",
+    "title": "Potential credential exfiltration",
+    "category": "secret_exfiltration",
+    "severity": "critical",
+    "description": "Metadata combines outbound transfer language with secrets or local credential sources.",
+    "patterns": [
+      "(?:send|upload|post|exfiltrat(?:e|ion)).{0,100}(?:api[ _-]?key|secret|token|credential|password|\\.ssh|environment variable)",
+      "(?:api[ _-]?key|secret|token|credential|password|\\.ssh|environment variable).{0,100}(?:send|upload|post|exfiltrat(?:e|ion))"
+    ],
+    "fields": ["description", "schema", "metadata"]
+  },
+  {
+    "id": "MCP003",
+    "title": "Unrestricted network request capability",
+    "category": "ssrf",
+    "severity": "medium",
+    "description": "Metadata advertises user-controlled network destinations without an apparent restriction.",
+    "patterns": [
+      "(?:fetch|request|download|proxy|crawl).{0,100}(?:arbitrary|any|user[- ]?(?:supplied|provided)).{0,80}(?:url|uri|endpoint|host)",
+      "(?:arbitrary|any|user[- ]?(?:supplied|provided)).{0,80}(?:url|uri|endpoint|host).{0,100}(?:fetch|request|download|proxy|crawl)"
+    ],
+    "fields": ["description", "schema"]
+  },
+  {
+    "id": "MCP004",
+    "title": "Unbounded command execution",
+    "category": "command_execution",
+    "severity": "high",
+    "description": "Metadata advertises execution of arbitrary or user-provided shell commands/scripts.",
+    "patterns": [
+      "(?:execute|run|invoke).{0,100}(?:arbitrary|any|user[- ]?(?:supplied|provided)).{0,80}(?:shell|command|script|powershell|bash)",
+      "(?:arbitrary|any|user[- ]?(?:supplied|provided)).{0,80}(?:shell|command|script|powershell|bash).{0,100}(?:execute|run|invoke)"
+    ],
+    "fields": ["description", "schema"]
+  },
+  {
+    "id": "MCP005",
+    "title": "Destructive action without bounded scope",
+    "category": "destructive_operation",
+    "severity": "medium",
+    "description": "Metadata advertises deletion or destructive mutation with an unbounded target.",
+    "patterns": [
+      "(?:delete|remove|wipe|drop).{0,100}(?:all|any|entire|recursive|arbitrary).{0,80}(?:file|directory|record|database|table|resource)",
+      "(?:all|any|entire|recursive|arbitrary).{0,80}(?:file|directory|record|database|table|resource).{0,100}(?:delete|remove|wipe|drop)"
+    ],
+    "fields": ["description", "schema"]
+  },
+  {
+    "id": "MCP006",
+    "title": "Tool-poisoning or precedence directive",
+    "category": "tool_poisoning",
+    "severity": "high",
+    "description": "Metadata directs an agent to prefer this tool over its established instructions or other tools.",
+    "patterns": [
+      "(?:must|should|always) use (?:this|our) tool (?:instead of|before|over)",
+      "(?:override|replace) (?:the )?(?:agent|model|client)(?:'s)? (?:tool|instructions|selection)"
+    ],
+    "fields": ["description", "metadata"]
+  },
+  {
+    "id": "MCP007",
+    "title": "Tool shadowing directive",
+    "category": "tool_shadowing",
+    "severity": "high",
+    "description": "Metadata claims it replaces, shadows, or impersonates an existing tool.",
+    "patterns": [
+      "(?:replace|shadow|override|impersonat(?:e|es|ing)).{0,80}(?:existing|other|another|system).{0,80}tool",
+      "(?:existing|other|another|system).{0,80}tool.{0,80}(?:replace|shadow|override|impersonat(?:e|es|ing))"
+    ],
+    "fields": ["name", "description", "metadata"]
+  },
+  {
+    "id": "MCP008",
+    "title": "Cross-server context forwarding",
+    "category": "cross_server_attack",
+    "severity": "high",
+    "description": "Metadata forwards results or context between independent tools or MCP servers.",
+    "patterns": [
+      "(?:forward|send|relay|share).{0,100}(?:result|output|context|conversation).{0,100}(?:another|other|third[- ]party).{0,60}(?:server|tool)",
+      "(?:another|other|third[- ]party).{0,60}(?:server|tool).{0,100}(?:result|output|context|conversation)"
+    ],
+    "fields": ["description", "schema", "metadata"]
+  },
+  {
+    "id": "MCP009",
+    "title": "OAuth confused-deputy behavior",
+    "category": "oauth_confused_deputy",
+    "severity": "high",
+    "description": "Metadata asks to reuse or exchange an authorization token across users or services.",
+    "patterns": [
+      "(?:reuse|exchange|forward|send).{0,100}(?:oauth|access)[ _-]?token.{0,100}(?:another|other|any|third[- ]party|service|user)",
+      "(?:on behalf of|impersonat(?:e|ion)).{0,100}(?:oauth|access)[ _-]?token"
+    ],
+    "fields": ["description", "schema", "metadata"]
+  }
+]

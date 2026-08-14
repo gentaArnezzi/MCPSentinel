@@ -1,0 +1,58 @@
+name: MCPSentinel
+description: Scan an MCP server in CI and write a SARIF report.
+branding:
+  icon: shield
+  color: purple
+inputs:
+  target:
+    description: Absolute Streamable HTTP MCP URL or quoted stdio command.
+    required: true
+  transport:
+    description: "Target transport: auto, http, or stdio."
+    required: false
+    default: auto
+  fail-on:
+    description: "Fail the action at this severity: none, low, medium, high, or critical."
+    required: false
+    default: high
+  report-path:
+    description: SARIF output path.
+    required: false
+    default: mcpsentinel.sarif
+  baseline-dir:
+    description: Baseline and judge-cache directory, normally persisted by the workflow cache.
+    required: false
+    default: .mcpsentinel
+  rules:
+    description: Optional additive JSON rule file path.
+    required: false
+    default: ""
+  policy:
+    description: Optional JSON policy file path.
+    required: false
+    default: ""
+  judge:
+    description: "Semantic judge: heuristic, openai, or auto."
+    required: false
+    default: heuristic
+outputs:
+  sarif:
+    description: Path to the generated SARIF report.
+    value: ${{ inputs.report-path }}
+runs:
+  using: composite
+  steps:
+    - name: Restore MCPSentinel baseline cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.baseline-dir }}
+        key: mcpsentinel-${{ runner.os }}-${{ github.repository }}-${{ github.ref_name }}
+        restore-keys: |
+          mcpsentinel-${{ runner.os }}-${{ github.repository }}-
+    - shell: bash
+      run: |
+        python -m pip install "$GITHUB_ACTION_PATH"
+        command=(scan "$INPUT_TARGET" --transport "$INPUT_TRANSPORT" --format sarif --output "$INPUT_REPORT_PATH" --baseline-dir "$INPUT_BASELINE_DIR" --judge "$INPUT_JUDGE" --fail-on "$INPUT_FAIL_ON")
+        if [[ -n "$INPUT_RULES" ]]; then command+=(--rules "$INPUT_RULES"); fi
+        if [[ -n "$INPUT_POLICY" ]]; then command+=(--policy "$INPUT_POLICY"); fi
+        mcpsentinel "${command[@]}"

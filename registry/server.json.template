@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.YOUR_GITHUB_USERNAME/mcpsentinel",
+  "title": "MCPSentinel",
+  "description": "Precision-first security scanning for Model Context Protocol servers.",
+  "repository": {
+    "url": "https://github.com/YOUR_GITHUB_USERNAME/MCPSentinel",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "mcpsentinel",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "MCPSENTINEL_ALLOWED_HOSTS",
+          "description": "Comma-separated MCP server hostnames that the MCP-native scanner may connect to.",
+          "isRequired": true,
+          "isSecret": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

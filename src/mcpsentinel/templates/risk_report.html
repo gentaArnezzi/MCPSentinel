@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MCPSentinel risk report</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+      body { max-width: 1100px; margin: 2.5rem auto; padding: 0 1.25rem; background: #10131a; color: #e7eaf0; }
+      header, section { border: 1px solid #2b3240; border-radius: 12px; background: #181d27; padding: 1.4rem; margin-bottom: 1rem; }
+      h1, h2, p { margin-top: 0; } .muted { color: #adb5c4; } .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .8rem; }
+      .metric { padding: 1rem; border-radius: 8px; background: #232a38; } .score { font-size: 2.6rem; font-weight: 800; }
+      .critical { color: #ff6b6b; } .high { color: #ff9f43; } .medium { color: #ffd166; } .low, .info { color: #74c0fc; }
+      table { width: 100%; border-collapse: collapse; } th, td { text-align: left; vertical-align: top; border-bottom: 1px solid #2b3240; padding: .8rem .45rem; }
+      code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .82rem; color: #cbd4e6; } .pill { font-weight: 700; text-transform: uppercase; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p class="muted">MCPSentinel security report</p>
+      <h1>{{ report.target.identity }}</h1>
+      <p class="muted">Completed {{ report.completed_at }} · {{ report.descriptors|length }} descriptors · judge: {{ report.judge }}</p>
+    </header>
+    <section class="grid">
+      <div class="metric"><div class="muted">Risk score</div><div class="score {{ risk_level }}">{{ risk_score }}/100</div><div class="pill {{ risk_level }}">{{ risk_level }}</div></div>
+      {% for severity, count in counts.items() %}<div class="metric"><div class="muted">{{ severity }}</div><div class="score {{ severity }}">{{ count }}</div></div>{% endfor %}
+    </section>
+    <section>
+      <h2>Findings</h2>
+      {% if report.findings %}
+      <table><thead><tr><th>Severity</th><th>Finding</th><th>Subject</th><th>Confidence</th><th>Evidence</th></tr></thead><tbody>
+      {% for finding in report.findings %}<tr>
+        <td><span class="pill {{ finding.severity }}">{{ finding.severity }}</span></td>
+        <td><strong>{{ finding.rule_id }} · {{ finding.title }}</strong><br><span class="muted">{{ finding.message }}</span>{% if finding.rationale %}<br><span class="muted">Triage: {{ finding.rationale }}</span>{% endif %}</td>
+        <td>{{ finding.subject_kind }}<br><code>{{ finding.subject_name }}</code></td><td>{{ "%.0f%%"|format(finding.confidence * 100) }}<br><span class="muted">{{ finding.layers|join(" + ") }}</span></td>
+        <td><code>{{ finding.evidence|join("\n") }}</code></td>
+      </tr>{% endfor %}</tbody></table>
+      {% else %}<p>No reportable findings.</p>{% endif %}
+    </section>
+    {% if report.dynamic_observations %}<section><h2>Dynamic sandbox observations</h2><table><thead><tr><th>Tool</th><th>Status</th><th>Duration</th><th>Response</th></tr></thead><tbody>{% for observation in report.dynamic_observations %}<tr><td><code>{{ observation.tool_name }}</code></td><td>{{ observation.status }}</td><td>{{ observation.duration_ms }} ms</td><td><code>{{ observation.response_digest or observation.detail or "No response body retained" }}</code></td></tr>{% endfor %}</tbody></table></section>{% endif %}
+  </body>
+</html>
