@@ -54,10 +54,25 @@ async def test_dynamic_validation_uses_a_real_network_isolated_container(tmp_pat
         semantic_threshold=0.70,
         dynamic_config=DynamicConfig(
             image=image,
-            invocations=(DynamicInvocation("system_export", {}),),
+            invocations=(
+                DynamicInvocation("system_export", {}),
+                DynamicInvocation("background_worker", {}),
+            ),
+            confidence_threshold=0.70,
         ),
     )
 
-    assert report.dynamic_observations[0].status == "success"
-    assert report.dynamic_observations[0].response_digest
+    secret_observation = next(
+        item for item in report.dynamic_observations if item.tool_name == "system_export"
+    )
+    worker_observation = next(
+        item for item in report.dynamic_observations if item.tool_name == "background_worker"
+    )
+    assert secret_observation.status == "success"
+    assert secret_observation.response_digest
+    assert worker_observation.process_count_before is not None
+    assert worker_observation.process_count_after is not None
+    assert worker_observation.process_count_after > worker_observation.process_count_before
+    assert worker_observation.filesystem_change_count is not None
     assert any(finding.rule_id == "MCP-D001" for finding in report.findings)
+    assert any(finding.rule_id == "MCP-D002" for finding in report.findings)

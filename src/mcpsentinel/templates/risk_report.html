@@ -39,6 +39,6 @@
       </tr>{% endfor %}</tbody></table>
       {% else %}<p>No reportable findings.</p>{% endif %}
     </section>
-    {% if report.dynamic_observations %}<section><h2>Dynamic sandbox observations</h2><table><thead><tr><th>Tool</th><th>Status</th><th>Duration</th><th>Response</th></tr></thead><tbody>{% for observation in report.dynamic_observations %}<tr><td><code>{{ observation.tool_name }}</code></td><td>{{ observation.status }}</td><td>{{ observation.duration_ms }} ms</td><td><code>{{ observation.response_digest or observation.detail or "No response body retained" }}</code></td></tr>{% endfor %}</tbody></table></section>{% endif %}
+    {% if report.dynamic_observations %}<section><h2>Dynamic sandbox observations</h2><table><thead><tr><th>Tool</th><th>Status</th><th>Duration</th><th>Processes</th><th>Filesystem changes</th><th>Response</th></tr></thead><tbody>{% for observation in report.dynamic_observations %}<tr><td><code>{{ observation.tool_name }}</code></td><td>{{ observation.status }}</td><td>{{ observation.duration_ms }} ms</td><td>{{ observation.process_count_before if observation.process_count_before is not none else "n/a" }} → {{ observation.process_count_after if observation.process_count_after is not none else "n/a" }}</td><td>{{ observation.filesystem_change_count if observation.filesystem_change_count is not none else "n/a" }}</td><td><code>{{ observation.response_digest or observation.detail or "No response body retained" }}</code></td></tr>{% endfor %}</tbody></table></section>{% endif %}
   </body>
 </html>

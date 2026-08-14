@@ -6,8 +6,10 @@ import asyncio
 import hashlib
 import json
 import shutil
+import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 from .discovery import _session_for
@@ -49,7 +51,18 @@ class DynamicValidationResult:
     findings: list[Finding]
 
 
-def sandbox_target(config: DynamicConfig) -> TargetConfig:
+@dataclass(frozen=True)
+class _SandboxTelemetry:
+    """Counts from Docker only; never retain process arguments or file paths."""
+
+    process_count: int | None
+    filesystem_change_count: int | None
+
+
+_TELEMETRY_TIMEOUT_SECONDS = 2.0
+
+
+def sandbox_target(config: DynamicConfig, *, cidfile: Path | None = None) -> TargetConfig:
     """Build an unprivileged, network-isolated Docker stdio target without host mounts."""
     if not config.image.strip():
         raise DynamicValidationError("Dynamic validation needs a non-empty Docker image.")
@@ -71,6 +84,8 @@ def sandbox_target(config: DynamicConfig) -> TargetConfig:
         "--user=65534:65534",
         "--workdir=/tmp",
     ]
+    if cidfile is not None:
+        arguments.extend(("--cidfile", str(cidfile)))
     if config.entrypoint:
         arguments.extend(("--entrypoint", config.entrypoint[0]))
     arguments.append(config.image)
@@ -119,18 +134,131 @@ async def run_dynamic_validation(
             # Never let an earlier selected tool alter in-memory state or /tmp
             # for a later tool. Each invocation starts and removes its own
             # constrained Docker process.
-            target = sandbox_target(config)
-            async with _session_for(target) as session:
-                await session.initialize()
-                observation, finding = await _invoke(session, invocation, config.timeout_seconds)
+            with tempfile.TemporaryDirectory(prefix="mcpsentinel-dynamic-") as temporary_dir:
+                cidfile = Path(temporary_dir) / "container-id"
+                target = sandbox_target(config, cidfile=cidfile)
+                async with _session_for(target) as session:
+                    await session.initialize()
+                    container_id = await _wait_for_container_id(cidfile)
+                    telemetry_before = await _capture_telemetry(container_id)
+                    observation, response_finding = await _invoke(
+                        session, invocation, config.timeout_seconds
+                    )
+                    telemetry_after = await _capture_telemetry(container_id)
+                observation = replace(
+                    observation,
+                    process_count_before=telemetry_before.process_count,
+                    process_count_after=telemetry_after.process_count,
+                    filesystem_change_count=telemetry_after.filesystem_change_count,
+                )
                 observations.append(observation)
-                if finding is not None:
-                    findings.append(finding)
+                if response_finding is not None:
+                    findings.append(response_finding)
+                residual_process_finding = _residual_process_finding(
+                    invocation, telemetry_before, telemetry_after
+                )
+                if residual_process_finding is not None:
+                    findings.append(residual_process_finding)
     except DynamicValidationError:
         raise
     except Exception as error:
         raise DynamicValidationError(f"Docker sandbox validation failed: {error}") from error
     return DynamicValidationResult(observations=observations, findings=findings)
+
+
+async def _wait_for_container_id(cidfile: Path) -> str | None:
+    """Wait briefly for Docker to write the per-invocation container ID."""
+    for _ in range(20):
+        try:
+            container_id = cidfile.read_text(encoding="utf-8").strip()
+        except OSError:
+            container_id = ""
+        is_container_id = len(container_id) == 64 and all(
+            character in "0123456789abcdef" for character in container_id
+        )
+        if is_container_id:
+            return container_id
+        await asyncio.sleep(0.05)
+    return None
+
+
+async def _capture_telemetry(container_id: str | None) -> _SandboxTelemetry:
+    """Read bounded Docker counters while the container is still alive."""
+    if container_id is None:
+        return _SandboxTelemetry(process_count=None, filesystem_change_count=None)
+    processes, filesystem_changes = await asyncio.gather(
+        _docker_output("top", container_id, "-eo", "pid"),
+        _docker_output("diff", container_id),
+    )
+    return _SandboxTelemetry(
+        process_count=_process_count(processes),
+        filesystem_change_count=len(filesystem_changes) if filesystem_changes is not None else None,
+    )
+
+
+async def _docker_output(*arguments: str) -> list[str] | None:
+    """Return bounded Docker CLI output without retaining untrusted telemetry details."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "docker",
+            *arguments,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+    try:
+        stdout, _ = await asyncio.wait_for(
+            process.communicate(), timeout=_TELEMETRY_TIMEOUT_SECONDS
+        )
+    except TimeoutError:
+        process.kill()
+        await process.communicate()
+        return None
+    if process.returncode != 0:
+        return None
+    return stdout[:65536].decode("utf-8", errors="replace").splitlines()
+
+
+def _process_count(lines: list[str] | None) -> int | None:
+    """Count `docker top` rows while discarding its header and command data."""
+    if not lines:
+        return None
+    return max(0, len([line for line in lines[1:] if line.strip()]))
+
+
+def _residual_process_finding(
+    invocation: DynamicInvocation,
+    before: _SandboxTelemetry,
+    after: _SandboxTelemetry,
+) -> Finding | None:
+    if (
+        before.process_count is None
+        or after.process_count is None
+        or after.process_count <= before.process_count
+    ):
+        return None
+    return Finding(
+        rule_id="MCP-D002",
+        title="Dynamic invocation left additional process(es) running",
+        category=Category.COMMAND_EXECUTION,
+        severity=Severity.MEDIUM,
+        message=(
+            "The sandbox had more processes after the tool returned than before the call."
+        ),
+        subject_kind=DescriptorKind.TOOL,
+        subject_name=invocation.tool_name,
+        evidence=(
+            "Sandbox process count increased from "
+            f"{before.process_count} to {after.process_count}; process details were not retained.",
+        ),
+        confidence=0.80,
+        layers=("dynamic",),
+        rationale=(
+            "Review whether the owned tool intentionally leaves background work running. "
+            "The process remains constrained to the disposable, network-isolated container."
+        ),
+    )
 
 
 async def _invoke(

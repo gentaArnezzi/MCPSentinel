@@ -43,7 +43,7 @@ $ mcpsentinel
 |                     Read-only by default                       |
 +----------------------------------------------------------------+
 
-Welcome to MCPSentinel 0.4.0
+Welcome to MCPSentinel 0.5.0
 
 1. Run your first offline scan:
    mcpsentinel scan http://localhost:8000/mcp
@@ -214,7 +214,9 @@ mcpsentinel scan "python -m my_server" --transport stdio \
   --dynamic-invoke 'unsafe_tool={"fixture": true}'
 ```
 
-The dynamic server image must already exist locally; MCPSentinel uses `--pull=never`. Every explicit tool invocation receives its own fresh container/session, so state from one selected tool cannot affect another. Docker is not needed for normal metadata scans. A dynamic response is retained only as a SHA-256 digest and content-type summary. If it resembles credential material, MCPSentinel reports `MCP-D001` without writing the response text to disk.
+The dynamic server image must already exist locally; MCPSentinel uses `--pull=never`. Every explicit tool invocation receives its own fresh container/session, so state from one selected tool cannot affect another. Docker is not needed for normal metadata scans. A dynamic response is retained only as a SHA-256 digest and content-type summary.
+
+For each owned-target invocation, MCPSentinel also records the Docker process count immediately before and after the call, plus the number of copy-on-write filesystem changes reported by Docker. It never retains process arguments or filesystem paths. An additional process still running after the call produces `MCP-D002`; it is a review signal for background work, **not** evidence of a host escape. Credential-like response material produces `MCP-D001` without writing response text to disk. This bounded telemetry does not trace syscalls, inspect arbitrary environment reads, or prove that no network connection was attempted—the container's `--network=none` boundary remains the network control.
 
 The repository includes a deliberately local-only Docker fixture to verify this boundary end to end. It is excluded from the normal test suite because it needs a running Docker daemon and builds an image:
 
@@ -231,7 +233,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.4.0
+- uses: gentaArnezzi/MCPSentinel@v0.5.0
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -246,7 +248,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.4.0
+- uses: gentaArnezzi/MCPSentinel@v0.5.0
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -280,8 +282,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.4.0
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.4.0 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.5.0
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.5.0 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:
@@ -315,7 +317,7 @@ For a real-world benchmark, collect only metadata that you are authorized to ass
 
 MCPSentinel is useful as a preflight signal for three workflows: an individual developer deciding whether to inspect an MCP server more deeply, a maintainer self-auditing metadata before release, and a security team adding a non-blocking or reviewed CI gate.
 
-It discovers advertised MCP metadata; it does not read a server's source code, prove authorization boundaries, or guarantee that runtime behavior matches an honest description. A clean report is not proof that a server is safe. Dynamic validation is intentionally narrower still: it can only invoke explicitly named, high-confidence tools from an image you own, with arguments you supply. It is not a safe way to probe arbitrary public servers.
+It discovers advertised MCP metadata; it does not read a server's source code, prove authorization boundaries, or guarantee that runtime behavior matches an honest description. A clean report is not proof that a server is safe. Dynamic validation is intentionally narrower still: it can only invoke explicitly named, high-confidence tools from an image you own, with arguments you supply. Its process and filesystem counters are bounded review evidence, not full behavioral instrumentation. It is not a safe way to probe arbitrary public servers.
 
 The default scanner is read-only. It never calls a discovered tool, follows HTTP redirects, or enables dynamic execution from the GitHub Action or MCP-native server. Use the result as evidence for review and combine it with source review, dependency review, permissions/egress controls, and normal incident response processes.
 

@@ -18,7 +18,7 @@ For the first release, configure the PyPI **pending** trusted publisher with the
 | Workflow name | `publish.yml` |
 | Environment name | `pypi` |
 
-Then create the GitHub environment named `pypi` and protect it with any reviewers you want to approve releases. Publishing a GitHub Release for a version tag such as `v0.4.0` runs [`.github/workflows/publish.yml`](../.github/workflows/publish.yml). It tests and builds the package, publishes to PyPI using OIDC, then submits the matching `registry/server.json` using GitHub OIDC. No package token, Registry token, or password is stored in GitHub.
+Then create the GitHub environment named `pypi` and protect it with any reviewers you want to approve releases. Publishing a GitHub Release for a version tag such as `v0.5.0` runs [`.github/workflows/publish.yml`](../.github/workflows/publish.yml). It tests and builds the package, publishes to PyPI using OIDC, then submits the matching `registry/server.json` using GitHub OIDC. No package token, Registry token, or password is stored in GitHub.
 
 For every later release, update the package and Registry versions together before creating the matching `vX.Y.Z` GitHub Release. The workflow rejects a release if the tag, `pyproject.toml`, and `registry/server.json` do not agree.
 

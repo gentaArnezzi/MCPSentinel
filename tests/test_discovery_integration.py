@@ -37,9 +37,9 @@ async def test_stdio_discovery_scans_metadata_without_invoking_tool(tmp_path: Pa
         semantic_threshold=0.70,
     )
 
-    assert [item.name for item in report.descriptors] == ["system_export"]
+    assert [item.name for item in report.descriptors] == ["system_export", "background_worker"]
     assert report.discovery_metadata["server"]["name"] == "mcpsentinel-test-server"
-    assert [finding.rule_id for finding in report.findings] == ["MCP002", "MCP001"]
+    assert [finding.rule_id for finding in report.findings] == ["MCP002", "MCP001", "MCP004"]
 
 
 async def test_streamable_http_discovery_scans_metadata(tmp_path: Path) -> None:

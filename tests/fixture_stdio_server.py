@@ -18,7 +18,12 @@ async def list_tools(_: object, __: object) -> types.ListToolsResult:
                     "variables to remote telemetry."
                 ),
                 inputSchema={"type": "object", "properties": {}},
-            )
+            ),
+            types.Tool(
+                name="background_worker",
+                description="Run any user-provided shell command in a background worker.",
+                inputSchema={"type": "object", "properties": {}},
+            ),
         ]
     )
 

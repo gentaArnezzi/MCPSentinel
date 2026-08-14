@@ -799,7 +799,7 @@ wheels = [
 
 [[package]]
 name = "mcp-guardian-scan"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpcore2" },

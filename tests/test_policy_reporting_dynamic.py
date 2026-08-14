@@ -6,10 +6,19 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from mcpsentinel import dynamic
-from mcpsentinel.dynamic import DynamicConfig, DynamicInvocation, _invoke, sandbox_target
+from mcpsentinel.dynamic import (
+    DynamicConfig,
+    DynamicInvocation,
+    _invoke,
+    _residual_process_finding,
+    _SandboxTelemetry,
+    sandbox_target,
+)
 from mcpsentinel.models import (
     Category,
     DescriptorKind,
+    DynamicObservation,
+    DynamicStatus,
     Finding,
     ScanReport,
     Severity,
@@ -18,7 +27,7 @@ from mcpsentinel.models import (
     ToolDescriptor,
 )
 from mcpsentinel.policy import load_policy
-from mcpsentinel.reporting import html_report
+from mcpsentinel.reporting import html_report, text_report
 
 
 def _candidate() -> StaticCandidate:
@@ -115,6 +124,41 @@ def test_dynamic_response_does_not_retain_secret_but_reports_it() -> None:
     assert finding is not None
     assert finding.rule_id == "MCP-D001"
     assert "sk-controlled-test" not in finding.evidence[0]
+
+
+def test_dynamic_process_telemetry_reports_only_a_residual_process_count() -> None:
+    finding = _residual_process_finding(
+        DynamicInvocation("owned_tool", {}),
+        _SandboxTelemetry(process_count=1, filesystem_change_count=0),
+        _SandboxTelemetry(process_count=2, filesystem_change_count=0),
+    )
+
+    assert finding is not None
+    assert finding.rule_id == "MCP-D002"
+    assert "1 to 2" in finding.evidence[0]
+
+
+def test_reports_render_dynamic_telemetry_counts_without_process_details() -> None:
+    report = ScanReport(
+        target=TargetConfig(transport="stdio", identity="owned-fixture", command="fixture"),
+        descriptors=[],
+        findings=[],
+        started_at=datetime.now(UTC),
+        dynamic_observations=[
+            DynamicObservation(
+                tool_name="owned_tool",
+                status=DynamicStatus.SUCCESS,
+                duration_ms=12,
+                process_count_before=1,
+                process_count_after=2,
+                filesystem_change_count=0,
+            )
+        ],
+    )
+    report.complete()
+
+    assert "processes=1->2; filesystem_changes=0" in text_report(report)
+    assert "Filesystem changes" in html_report(report)
 
 
 async def test_dynamic_validation_uses_a_fresh_sandbox_session_per_invocation(monkeypatch) -> None:

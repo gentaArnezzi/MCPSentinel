@@ -72,6 +72,25 @@ def text_report(report: ScanReport) -> str:
     if report.notices:
         lines.extend(["", "Notes:"])
         lines.extend(f"- {notice}" for notice in report.notices)
+    if report.dynamic_observations:
+        lines.extend(["", "Dynamic sandbox observations:"])
+        for observation in report.dynamic_observations:
+            process_counts = (
+                "n/a"
+                if observation.process_count_before is None
+                or observation.process_count_after is None
+                else f"{observation.process_count_before}->{observation.process_count_after}"
+            )
+            filesystem_changes = (
+                "n/a"
+                if observation.filesystem_change_count is None
+                else str(observation.filesystem_change_count)
+            )
+            lines.append(
+                f"- {observation.tool_name}: {observation.status}; "
+                f"{observation.duration_ms} ms; processes={process_counts}; "
+                f"filesystem_changes={filesystem_changes}"
+            )
     for finding in report.findings:
         layers = "+".join(finding.layers)
         lines.extend(
