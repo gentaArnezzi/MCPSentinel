@@ -33,24 +33,11 @@ mcpsentinel                    # safe, no-write onboarding
 mcpsentinel scan http://localhost:8000/mcp
 ```
 
-The first command you see is deliberately friendly and branded, while scan output stays free of decorative text when you select `json` or `sarif` for automation:
+The first command opens a friendly, copy-pasteable onboarding guide. Interactive
+terminals get colored panels; `json` and `sarif` remain free of decorative text
+for automation.
 
-```text
-$ mcpsentinel
-+----------------------------------------------------------------+
-|                          MCPSENTINEL                           |
-|       Security review for Model Context Protocol servers        |
-|                     Read-only by default                       |
-+----------------------------------------------------------------+
-
-Welcome to MCPSentinel 0.8.3
-
-1. Run your first offline scan:
-   mcpsentinel scan http://localhost:8000/mcp
-
-2. Save CI-friendly output and fail on high-severity findings:
-   mcpsentinel scan http://localhost:8000/mcp --format sarif --output results.sarif --fail-on high
-```
+![MCPSentinel interactive terminal onboarding](docs/images/onboarding-terminal.png)
 
 | I want to… | Start here |
 | --- | --- |
@@ -152,6 +139,14 @@ your operating-system user during startup or discovery. Scan only stdio
 executables you trust to launch locally. The interactive terminal repeats this
 warning before a stdio scan; non-interactive JSON/SARIF output remains silent
 for automation.
+
+### Example interactive result
+
+The capture below uses MCPSentinel's controlled local test fixture, whose tool
+metadata is intentionally suspicious. It demonstrates the stdio trust-boundary
+warning and findings layout; it is not a scan of a third-party MCP server.
+
+![MCPSentinel scan result with stdio trust-boundary warning](docs/images/scan-terminal.png)
 
 Useful options:
 
