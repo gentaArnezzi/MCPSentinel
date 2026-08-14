@@ -54,10 +54,20 @@ jobs:
         with:
           python-version: "3.12"
       - uses: ./
+        id: denied-stdio
+        continue-on-error: true
+        with:
+          target: python tests/fixture_stdio_server.py
+          transport: stdio
+          fail-on: none
+      - if: steps.denied-stdio.outcome != 'failure'
+        run: exit 1
+      - uses: ./
         id: scan
         with:
           target: python tests/fixture_stdio_server.py
           transport: stdio
+          allow-stdio-execution: "true"
           fail-on: none
           report-path: mcpsentinel.sarif
       - run: test -s '${{ steps.scan.outputs.sarif }}'

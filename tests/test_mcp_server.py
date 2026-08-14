@@ -8,7 +8,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from mcpsentinel import mcp_server
-from mcpsentinel.models import ScanReport
+from mcpsentinel.models import ScanReport, TargetConfig
 
 
 async def test_mcp_native_server_rejects_unallowlisted_http_targets(monkeypatch) -> None:
@@ -58,6 +58,44 @@ def test_mcp_native_can_explicitly_allow_a_trusted_private_network(monkeypatch) 
     target = mcp_server._target_from_mcp_request("http://localhost:8765/mcp", transport="http")
 
     assert target.restrict_to_public_network is False
+
+
+@pytest.mark.parametrize(
+    ("target", "transport"),
+    [
+        ("python -c 'print(\"not executed\")'", "stdio"),
+        ("python -c 'print(\"not executed\")'", "auto"),
+    ],
+)
+def test_mcp_native_rejects_stdio_targets_even_with_legacy_opt_in(
+    monkeypatch, target: str, transport: str
+) -> None:
+    monkeypatch.setenv("MCPSENTINEL_ALLOW_STDIO_TARGETS", "true")
+
+    with pytest.raises(ValueError, match="allowlisted HTTP targets only"):
+        mcp_server._target_from_mcp_request(target, transport)
+
+
+async def test_mcp_native_never_approves_a_baseline(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MCPSENTINEL_ALLOWED_HOSTS", "example.com")
+    monkeypatch.setenv("MCPSENTINEL_MCP_APPROVE_BASELINE", "true")
+    monkeypatch.setenv("MCPSENTINEL_MCP_BASELINE_DIR", str(tmp_path))
+    received: dict[str, object] = {}
+
+    async def fake_scan(target: TargetConfig, **options: object) -> ScanReport:
+        received.update(options)
+        return ScanReport(
+            target=target,
+            descriptors=[],
+            findings=[],
+            started_at=datetime.now(UTC),
+        )
+
+    monkeypatch.setattr(mcp_server, "scan", fake_scan)
+
+    await mcp_server.scan_mcp_server("https://example.com/mcp", "http")
+
+    assert received["update_baseline"] is False
 
 
 async def test_mcp_native_stdio_server_exposes_the_scan_tool() -> None:

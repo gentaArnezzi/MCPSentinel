@@ -5,12 +5,18 @@ branding:
   color: purple
 inputs:
   target:
-    description: Absolute Streamable HTTP MCP URL or quoted stdio command.
+    description: Absolute Streamable HTTP MCP URL, or a trusted quoted stdio command when explicitly enabled.
     required: true
   transport:
     description: "Target transport: auto, http, or stdio."
     required: false
     default: auto
+  allow-stdio-execution:
+    description: >-
+      Set true only in a trusted workflow to start a stdio MCP process on the runner.
+      Never enable for untrusted pull requests or forks.
+    required: false
+    default: "false"
   fail-on:
     description: "Fail the action at this severity: none, low, medium, high, or critical."
     required: false
@@ -57,6 +63,7 @@ runs:
       env:
         INPUT_TARGET: ${{ inputs.target }}
         INPUT_TRANSPORT: ${{ inputs.transport }}
+        INPUT_ALLOW_STDIO_EXECUTION: ${{ inputs.allow-stdio-execution }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_REPORT_PATH: ${{ inputs.report-path }}
         INPUT_BASELINE_DIR: ${{ inputs.baseline-dir }}
@@ -65,6 +72,17 @@ runs:
         INPUT_POLICY: ${{ inputs.policy }}
         INPUT_JUDGE: ${{ inputs.judge }}
       run: |
+        effective_transport="$INPUT_TRANSPORT"
+        if [[ "$effective_transport" == "auto" ]]; then
+          case "$INPUT_TARGET" in
+            http://*|https://*) effective_transport="http" ;;
+            *) effective_transport="stdio" ;;
+          esac
+        fi
+        if [[ "$effective_transport" == "stdio" && "$INPUT_ALLOW_STDIO_EXECUTION" != "true" ]]; then
+          echo "::error::Stdio scanning starts the target process on the GitHub Actions runner. Set allow-stdio-execution: \"true\" only for trusted code."
+          exit 2
+        fi
         python -m pip install --require-hashes -r "$GITHUB_ACTION_PATH/requirements.lock"
         python -m pip install --no-deps --no-build-isolation "$GITHUB_ACTION_PATH"
         python -m pip check

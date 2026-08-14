@@ -7,12 +7,12 @@
     "url": "https://github.com/gentaArnezzi/MCPSentinel",
     "source": "github"
   },
-  "version": "0.8.4",
+  "version": "0.8.5",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcp-guardian-scan",
-      "version": "0.8.4",
+      "version": "0.8.5",
       "transport": {
         "type": "stdio"
       },
@@ -27,13 +27,6 @@
         {
           "name": "MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS",
           "description": "Set to true only to permit an explicitly allowlisted private or reserved HTTP address in a trusted local network.",
-          "isRequired": false,
-          "isSecret": false,
-          "format": "string"
-        },
-        {
-          "name": "MCPSENTINEL_MCP_APPROVE_BASELINE",
-          "description": "Set to true only for a reviewed, one-time operator approval of the current MCP metadata baseline.",
           "isRequired": false,
           "isSecret": false,
           "format": "string"

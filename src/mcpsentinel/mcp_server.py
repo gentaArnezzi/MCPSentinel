@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shlex
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -22,8 +21,8 @@ mcp = MCPServer(
     title="MCPSentinel MCP security scanner",
     description="Precision-first read-only metadata scans for allowlisted MCP targets.",
     instructions=(
-        "Scan targets only when an operator has configured them in MCPSENTINEL_ALLOWED_HOSTS. "
-        "Dynamic execution is intentionally unavailable through this server."
+        "Scan only operator-allowlisted HTTP targets. Stdio targets, dynamic execution, "
+        "and baseline approval are intentionally unavailable through this server."
     ),
     version=__version__,
 )
@@ -33,14 +32,14 @@ mcp = MCPServer(
     name="scan_mcp_server",
     title="Scan an MCP server for security risks",
     description=(
-        "Enumerate metadata from an allowlisted MCP server and return static, "
+        "Enumerate metadata from an operator-allowlisted HTTP MCP server and return static, "
         "semantic, and baseline security findings. Dynamic tool invocation is "
-        "never performed from this MCP-native interface."
+        "never performed and baselines are never approved from this MCP-native interface."
     ),
     annotations=types.ToolAnnotations(
         destructiveHint=False,
-        idempotentHint=False,
-        openWorldHint=True,
+        idempotentHint=True,
+        openWorldHint=False,
     ),
     structured_output=True,
 )
@@ -55,9 +54,7 @@ async def scan_mcp_server(
         rules_path=_configured_path("MCPSENTINEL_RULES_PATH"),
         policy_path=_configured_path("MCPSENTINEL_POLICY_PATH"),
         baseline_root=Path(os.environ.get("MCPSENTINEL_MCP_BASELINE_DIR", "~/.mcpsentinel")),
-        update_baseline=(
-            os.environ.get("MCPSENTINEL_MCP_APPROVE_BASELINE", "").lower() in _TRUE_VALUES
-        ),
+        update_baseline=False,
         judge_kind=os.environ.get("MCPSENTINEL_MCP_JUDGE", "heuristic"),
         judge_model=os.environ.get("MCPSENTINEL_MCP_JUDGE_MODEL", "gpt-4o-mini"),
         semantic_threshold=0.70,
@@ -97,19 +94,9 @@ def _target_from_mcp_request(target: str, transport: str) -> TargetConfig:
             ),
         )
 
-    if os.environ.get("MCPSENTINEL_ALLOW_STDIO_TARGETS", "").lower() not in _TRUE_VALUES:
-        raise ValueError(
-            "Stdio targets are disabled; set MCPSENTINEL_ALLOW_STDIO_TARGETS=true to enable."
-        )
-    pieces = shlex.split(target)
-    if not pieces:
-        raise ValueError("A stdio target must contain an executable command.")
-    command, *arguments = pieces
-    return TargetConfig(
-        transport="stdio",
-        identity=" ".join(pieces),
-        command=command,
-        arguments=tuple(arguments),
+    raise ValueError(
+        "MCP-native scanning supports allowlisted HTTP targets only. "
+        "Use the human CLI for a trusted stdio target."
     )
 
 

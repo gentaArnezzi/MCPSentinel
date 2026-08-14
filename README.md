@@ -248,7 +248,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.8.4
+- uses: gentaArnezzi/MCPSentinel@v0.8.5
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -263,7 +263,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.8.4
+- uses: gentaArnezzi/MCPSentinel@v0.8.5
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -271,11 +271,22 @@ Action scans preserve an approved baseline by default. Use `approve-baseline: "t
     approve-baseline: "true"
 ```
 
+The Action rejects stdio targets by default because scanning them starts a process on the GitHub runner. Only enable one for source you control in a trusted, protected push workflow—never an untrusted pull request or fork:
+
+```yaml
+- uses: gentaArnezzi/MCPSentinel@v0.8.5
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  with:
+    target: python server.py
+    transport: stdio
+    allow-stdio-execution: "true"
+```
+
 Set `OPENAI_API_KEY` in the workflow only when choosing `judge: openai` or `auto`; `heuristic` remains the default. For example, expose a GitHub Actions secret only to the scan step with `env: OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}`.
 
 ## MCP-native scanner
 
-Run `mcpsentinel-mcp` to expose the scanner as the MCP tool `scan_mcp_server` over stdio. It is intentionally more constrained than the CLI: dynamic execution is unavailable, target configuration is operator-controlled, HTTP targets must be explicitly allowlisted, and stdio targets are disabled unless the operator enables them. Its structured response uses the same credential-safe serialization as JSON and HTML reports.
+Run `mcpsentinel-mcp` to expose the scanner as the MCP tool `scan_mcp_server` over stdio. It is intentionally more constrained than the CLI: it only scans operator-allowlisted HTTP targets. It rejects target stdio commands, dynamic execution, and baseline approval, so an MCP client cannot turn a scan request into local process execution or silently change the trust snapshot. Its structured response uses the same credential-safe serialization as JSON and HTML reports.
 
 ```bash
 export MCPSENTINEL_ALLOWED_HOSTS="mcp.example.com,localhost"
@@ -284,7 +295,7 @@ mcpsentinel-mcp
 
 The allowlist accepts either `host` or an exact `host:port`. HTTP redirects are refused, each discovery session has a 30-second deadline, and private or reserved addresses are denied by default. For public MCP-native HTTP scans, the validated DNS address set is pinned to the HTTP transport while the original hostname remains the HTTP Host and TLS SNI name; this prevents a second DNS lookup from changing a validated public hostname into an internal destination. For a deliberately trusted local network, set `MCPSENTINEL_ALLOW_PRIVATE_HTTP_TARGETS=true` alongside its exact allowlist entry.
 
-Optional operator settings are `MCPSENTINEL_MCP_BASELINE_DIR`, `MCPSENTINEL_RULES_PATH`, `MCPSENTINEL_POLICY_PATH`, `MCPSENTINEL_MCP_JUDGE`, and `MCPSENTINEL_MCP_JUDGE_MODEL`. Set `MCPSENTINEL_ALLOW_STDIO_TARGETS=true` only in a trusted local environment. The MCP caller cannot choose arbitrary policy files, baseline paths, or approve a baseline. For a deliberate one-time approval, an operator can set `MCPSENTINEL_MCP_APPROVE_BASELINE=true`, execute the reviewed scan, then remove the variable.
+Optional operator settings are `MCPSENTINEL_MCP_BASELINE_DIR`, `MCPSENTINEL_RULES_PATH`, `MCPSENTINEL_POLICY_PATH`, `MCPSENTINEL_MCP_JUDGE`, and `MCPSENTINEL_MCP_JUDGE_MODEL`. The MCP caller cannot choose arbitrary policy files or baseline paths, and MCP-native scans never approve a baseline. For a trusted stdio server, use the human CLI and run `--approve-baseline` only after reviewing the report.
 
 ## Registry publication
 
@@ -297,8 +308,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.4
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.4 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.5
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.5 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:
