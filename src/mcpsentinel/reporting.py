@@ -179,8 +179,10 @@ def terminal_report(report: ScanReport, console: Console | None = None) -> None:
         console.print("[green]✓[/green] No reportable findings.")
 
     if report.notices:
-        notes = "\n".join(f"• {sanitize_text(note)}" for note in report.notices)
-        console.print(Panel(notes, title="Notes"))
+        for notice in report.notices:
+            console.print(
+                Text.assemble(("Note: ", "bold"), (sanitize_text(notice), "dim"))
+            )
 
 
 def html_report(report: ScanReport) -> str:

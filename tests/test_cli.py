@@ -23,8 +23,9 @@ def test_onboarding_can_force_colored_terminal_ui(capsys) -> None:
 
     output = capsys.readouterr().out
     assert "\x1b[" in output
-    assert "Start here:" in output
-    assert "CI-ready command" in output
+    assert "Your first three steps" in output
+    assert "Copy this to begin" in output
+    assert "When you are ready for CI" in output
     assert "mcpsentinel scan http://localhost:8000/mcp" in output
 
 

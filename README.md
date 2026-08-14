@@ -248,7 +248,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.8.3
+- uses: gentaArnezzi/MCPSentinel@v0.8.4
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -263,7 +263,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.8.3
+- uses: gentaArnezzi/MCPSentinel@v0.8.4
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -297,8 +297,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.3
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.3 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.4
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.4 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:

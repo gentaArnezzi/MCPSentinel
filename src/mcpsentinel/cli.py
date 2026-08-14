@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from rich import box
+from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -272,70 +274,76 @@ def _console(color: str) -> Console:
 
 
 def _print_onboarding(target: str | None, transport: str, color: str) -> None:
-    """Show a small, actionable Rich walkthrough to interactive developers."""
+    """Show a compact, actionable Rich walkthrough to interactive developers."""
     if color != "always" and not sys.stdout.isatty():
         print(_onboarding_text(target, transport), end="")
         return
 
-    first_scan, openai_hint = _onboarding_details(target, transport)
+    first_scan, _ = _onboarding_details(target, transport)
     console = _console(color)
     banner = Text(justify="center")
     banner.append("MCPSENTINEL\n", style="bold cyan")
     banner.append("Security review for Model Context Protocol servers\n", style="bold")
     banner.append("Read-only by default", style="dim")
     console.print(
-        Panel.fit(
-            banner,
-            title=f"[bold cyan]Welcome to MCPSentinel {__version__}[/bold cyan]",
-            border_style="cyan",
-            padding=(1, 4),
+        Align.center(
+            Panel.fit(
+                banner,
+                border_style="cyan",
+                box=box.ROUNDED,
+                padding=(1, 4),
+            )
         )
     )
     console.print(
-        "[bold]Start here:[/] "
-        "[dim]no API key, configuration file, or server tool call is needed.[/]"
+        Text.assemble(
+            (f"MCPSentinel {__version__}", "bold cyan"),
+            "  ",
+            ("Offline by default · no API key required", "dim"),
+        ),
+        justify="center",
     )
-    console.print(
-        Panel(
-            Text(first_scan, style="bold cyan", overflow="fold"),
-            title="[bold cyan]1. Scan an MCP server[/bold cyan]",
-            subtitle="[dim]offline heuristic by default[/dim]",
-            border_style="cyan",
-            padding=(1, 2),
-        )
-    )
+    console.print()
 
-    next_steps = Table.grid(padding=(0, 1), expand=False)
-    next_steps.add_column(style="bold cyan", no_wrap=True)
-    next_steps.add_column()
-    next_steps.add_row(
-        "2.", "Review findings, then explicitly approve a baseline only when you trust it."
-    )
-    next_steps.add_row("3.", "Use SARIF when you are ready to add the same review gate to CI.")
-    console.print(next_steps)
+    steps = Table.grid(padding=(0, 1), expand=False)
+    steps.add_column(style="bold cyan", no_wrap=True)
+    steps.add_column()
+    steps.add_row("01", "Discover MCP metadata without invoking server tools.")
+    steps.add_row("02", "Review findings and approve a baseline only after you trust it.")
+    steps.add_row("03", "Export SARIF when you are ready to enforce the review in CI.")
+    console.print("[bold]Your first three steps[/]")
+    console.print(steps)
+    console.print()
+
+    console.print("[bold cyan]Copy this to begin[/]")
     console.print(
-        Panel(
+        Panel.fit(
+            Text(first_scan, style="bold cyan", overflow="fold"),
+            border_style="cyan",
+            box=box.ROUNDED,
+            padding=(0, 2),
+        )
+    )
+    console.print("[dim]The default heuristic stays local and reads metadata only.[/]")
+    console.print()
+
+    console.print("[bold green]When you are ready for CI[/]")
+    console.print(
+        Panel.fit(
             Text(
                 f"{first_scan} --format sarif --output results.sarif --fail-on high",
                 style="bold green",
                 overflow="fold",
             ),
-            title="[bold green]CI-ready command[/bold green]",
             border_style="green",
-            padding=(1, 2),
-        )
-    )
-    console.print(
-        Panel(
-            Text(openai_hint, overflow="fold"),
-            title="[bold yellow]Optional semantic review[/bold yellow]",
-            border_style="yellow",
+            box=box.ROUNDED,
             padding=(0, 2),
         )
     )
+    console.print()
     console.print(
-        "[dim]Need help?[/] [bold cyan]mcpsentinel scan --help[/]  "
-        "[dim]•[/]  [bold cyan]mcpsentinel onboard --target <target>[/]"
+        "[dim]Advanced options stay opt-in. Use[/] "
+        "[bold cyan]mcpsentinel scan --help[/] [dim]when you are ready.[/]"
     )
 
 
@@ -383,11 +391,12 @@ async def _run_scan(args: argparse.Namespace) -> int:
     console = _console(args.color) if rich_text_output else None
     if target.transport == "stdio" and rich_text_output:
         assert console is not None
+        console.print("[bold yellow]⚠ Stdio target execution[/]")
         console.print(
             Panel(
                 Text(_STDIO_EXECUTION_WARNING),
-                title="[bold yellow]⚠ Stdio target execution[/bold yellow]",
                 border_style="yellow",
+                box=box.ROUNDED,
             )
         )
     report = await scan(
