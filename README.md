@@ -58,8 +58,8 @@ discover metadata  ->  static candidates  ->  semantic triage  ->  human review
 
 ## What you get
 
-- MCP discovery over stdio and Streamable HTTP
-- configurable static pattern rules for tool, prompt, and resource descriptors, including tool poisoning, shadowing, cross-server, and OAuth confused-deputy signals
+- MCP v2 discovery over stdio and Streamable HTTP, negotiating `server/discover` first and falling back automatically to legacy `initialize`
+- configurable static pattern rules for tool, prompt, resource, resource-template, and server-instruction descriptors, including tool poisoning, shadowing, cross-server, and OAuth confused-deputy signals
 - semantic triage: offline heuristic by default, optional OpenAI structured-output judge with bounded fallback
 - explicit baseline approval and field-aware rug-pull definition diffs
 - branded Rich terminal, JSON, SARIF, and self-contained HTML risk reports
@@ -168,7 +168,7 @@ mcpsentinel baseline approve http://localhost:8000/mcp --baseline-dir .mcpsentin
   --fingerprint sha256:<reviewed-fingerprint>
 ```
 
-`--baseline-dir` is a root directory: by default it is `~/.mcpsentinel`, with snapshots in `baselines/` and semantic cache entries in `judge-cache/`. An ordinary scan **never updates** a baseline. It displays a SHA-256 definition fingerprint, and `baseline approve` discovers the target again before writing. Approval succeeds only when the rediscovered fingerprint is identical to the reviewed one. A changed, added, or removed descriptor is surfaced as an `MCP-B001` rug-pull review finding while the prior approved snapshot is preserved. For changes, the report identifies whether the description, input schema, and/or metadata changed without storing a raw historical descriptor.
+`--baseline-dir` is a root directory: by default it is `~/.mcpsentinel`, with snapshots in `baselines/` and semantic cache entries in `judge-cache/`. It also contains a local, mode-`0600` HMAC scope key. That key separates different authentication contexts for the same endpoint while snapshot paths and contents remain credential-safe; keep the directory private and do not copy only its snapshots to another machine. An ordinary scan **never updates** a baseline. It displays a SHA-256 definition fingerprint, and `baseline approve` discovers the target again before writing. Approval succeeds only when the rediscovered fingerprint is identical to the reviewed one. A changed, added, or removed descriptor—including server instructions—is surfaced as an `MCP-B001` rug-pull review finding while the prior approved snapshot is preserved. For changes, the report identifies whether the description, input schema, and/or metadata changed without storing a raw historical descriptor.
 
 The first scan reports that no approved baseline exists. That is an onboarding state, not a vulnerability finding. Establish a baseline only from a server version and environment you trust.
 
@@ -204,6 +204,8 @@ Supported categories are `prompt_injection`, `tool_poisoning`, `tool_shadowing`,
 
 Before regex evaluation, the scanner applies Unicode NFKC normalization, removes format controls such as zero-width characters, and collapses whitespace in an analysis-only view. It intentionally does not rewrite cross-script homoglyphs because that would risk misrepresenting legitimate metadata; use the benchmark to track those coverage gaps before claiming support for them. Descriptor fields also have byte budgets (4 KiB name, 64 KiB description, 192 KiB each for schema and metadata, 512 KiB total). An over-limit descriptor produces `MCP-N001` with the original byte count and SHA-256, while only bounded data reaches reports, rules, baselines, or an optional semantic judge.
 
+Treat custom rules as **trusted security configuration**: Python regex can consume significant CPU for a pathological pattern. Do not execute unreviewed rule changes in privileged CI workflows; protect and review these files as you would policy changes.
+
 ## Policy configuration
 
 `--policy path/to/policy.json` supplies organization-specific allow/deny controls. An allow selector suppresses matching static candidates; a deny selector emits a policy-enforced finding without relying on the semantic judge. Selectors can be rule IDs or objects scoped to a tool-name regex.
@@ -230,7 +232,7 @@ mcpsentinel scan "python -m my_server" --transport stdio \
   --dynamic-invoke 'unsafe_tool={"fixture": true}'
 ```
 
-The dynamic server image must already exist locally; MCPSentinel uses `--pull=never`. Every explicit tool invocation receives its own fresh container/session, so state from one selected tool cannot affect another. Docker is not needed for normal metadata scans. A dynamic response is retained only as a SHA-256 digest and content-type summary.
+The dynamic server image must already exist locally; MCPSentinel uses `--pull=never`. Every explicit tool invocation receives its own fresh container/session, so state from one selected tool cannot affect another. Docker is not needed for normal metadata scans. A dynamic response is retained only as a SHA-256 digest and content-type summary. The MCP SDK must still decode a dynamic response before the digest is calculated, so invoke only an owned fixture/server whose response behavior you trust.
 
 For each owned-target invocation, MCPSentinel records Docker process counts immediately before and after the call, plus copy-on-write filesystem changes as `before → after` and a delta. It marks telemetry as truncated if Docker output hit its collection budget, and never retains process arguments or filesystem paths. An additional process still running after the call produces `MCP-D002`; it is a review signal for background work, **not** evidence of a host escape. Credential-like response material produces `MCP-D001` without writing response text to disk. This bounded telemetry does not trace syscalls, inspect arbitrary environment reads, or prove that no network connection was attempted—the container's `--network=none` boundary remains the network control.
 
@@ -249,7 +251,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.8.6
+- uses: gentaArnezzi/MCPSentinel@v0.8.7
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -257,27 +259,29 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
     fail-on: high
     policy: .mcpsentinel/policy.json
 - uses: github/codeql-action/upload-sarif@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
+  if: always()
   with:
     sarif_file: ${{ steps.mcpsentinel.outputs.sarif }}
 ```
 
-The Action restores the newest branch-scoped baseline cache and saves a fresh immutable cache after each successful run, so reviewed baselines and semantic cache entries persist instead of becoming stuck at their first value. The cache is workflow convenience state, not a replacement for protected branches or review.
+The Action restores the newest branch-scoped baseline cache and saves a fresh immutable cache after each successful run, so reviewed baselines and semantic cache entries persist instead of becoming stuck at their first value. The cache is workflow convenience state, not a replacement for protected branches or review. A normal `fail-on` result still writes the SARIF report and `definition-fingerprint` output before returning status `1`; the `if: always()` upload step is therefore required to retain evidence when the security gate fails.
 
 To approve a baseline, first review a scan's `definition-fingerprint` output. Then pass that exact value into a separate trusted workflow on a protected branch. The Action rediscovers the server and refuses the approval if its definition has changed. Do not enable approval for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.8.6
+- uses: gentaArnezzi/MCPSentinel@v0.8.7
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
     transport: http
+    fail-on: none
     approve-baseline-fingerprint: "sha256:<fingerprint-you-reviewed>"
 ```
 
 The Action rejects stdio targets by default because scanning them starts a process on the GitHub runner. Only enable one for source you control in a trusted, protected push workflow—never an untrusted pull request or fork:
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.8.6
+- uses: gentaArnezzi/MCPSentinel@v0.8.7
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: python server.py
@@ -311,8 +315,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.6
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.6 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.7
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.7 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:

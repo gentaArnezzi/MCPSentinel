@@ -168,19 +168,16 @@ async def test_dynamic_validation_uses_a_fresh_sandbox_session_per_invocation(mo
     sessions: list[object] = []
 
     class Session:
-        async def initialize(self) -> None:
-            return None
-
         async def call_tool(self, name: str, _: dict[str, object]) -> dict[str, object]:
             return {"content": [{"type": "text", "text": f"controlled {name}"}]}
 
     @asynccontextmanager
-    async def fake_session_for(_: TargetConfig):
+    async def fake_client_for(_: TargetConfig):
         session = Session()
         sessions.append(session)
         yield session
 
-    monkeypatch.setattr(dynamic, "_session_for", fake_session_for)
+    monkeypatch.setattr(dynamic, "_client_for", fake_client_for)
     monkeypatch.setattr(dynamic.shutil, "which", lambda _: "/usr/local/bin/docker")
     eligible = [
         Finding(

@@ -71,3 +71,26 @@ jobs:
           fail-on: none
           report-path: mcpsentinel.sarif
       - run: test -s '${{ steps.scan.outputs.sarif }}'
+      - run: test -n '${{ steps.scan.outputs.definition-fingerprint }}'
+      - uses: ./
+        id: enforcement
+        continue-on-error: true
+        with:
+          target: python tests/fixture_stdio_server.py
+          transport: stdio
+          allow-stdio-execution: "true"
+          fail-on: high
+          report-path: enforced.sarif
+      - if: steps.enforcement.outcome != 'failure'
+        run: exit 1
+      - run: test -s '${{ steps.enforcement.outputs.sarif }}'
+      - run: test -n '${{ steps.enforcement.outputs.definition-fingerprint }}'
+      - uses: ./
+        id: approval
+        with:
+          target: python tests/fixture_stdio_server.py
+          transport: stdio
+          allow-stdio-execution: "true"
+          baseline-dir: .mcpsentinel-action-test
+          approve-baseline-fingerprint: 'sha256:${{ steps.scan.outputs.definition-fingerprint }}'
+      - run: test -n "$(find .mcpsentinel-action-test/baselines -type f -print -quit)"

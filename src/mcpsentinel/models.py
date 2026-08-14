@@ -45,6 +45,7 @@ class DescriptorKind(StrEnum):
     PROMPT = "prompt"
     RESOURCE = "resource"
     RESOURCE_TEMPLATE = "resource_template"
+    SERVER_INSTRUCTIONS = "server_instructions"
 
 
 class DynamicStatus(StrEnum):

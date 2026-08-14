@@ -7,12 +7,12 @@
     "url": "https://github.com/gentaArnezzi/MCPSentinel",
     "source": "github"
   },
-  "version": "0.8.6",
+  "version": "0.8.7",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcp-guardian-scan",
-      "version": "0.8.6",
+      "version": "0.8.7",
       "transport": {
         "type": "stdio"
       },

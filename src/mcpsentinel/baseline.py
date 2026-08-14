@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -62,8 +65,54 @@ class BaselineStore:
         self.root = root.expanduser()
         self.snapshot_dir = self.root / "baselines"
         self.cache_dir = self.root / "judge-cache"
+        self.scope_key_path = self.root / ".baseline-scope-key"
 
     def _target_key(self, target: TargetConfig) -> str:
+        """Key snapshots by opaque local auth scope, never a display identity."""
+        material = json.dumps(
+            {
+                "transport": target.transport,
+                "identity": target.identity,
+                "url": target.url,
+                "command": target.command,
+                "arguments": target.arguments,
+                "environment": target.environment,
+                "inherit_environment": target.inherit_environment,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hmac.new(self._scope_key(), material, hashlib.sha256).hexdigest()
+
+    def _scope_key(self) -> bytes:
+        """Get a local-only random HMAC key without retaining raw credentials."""
+        try:
+            key = self.scope_key_path.read_bytes()
+        except FileNotFoundError:
+            self.root.mkdir(parents=True, exist_ok=True)
+            generated = secrets.token_bytes(32)
+            try:
+                descriptor = os.open(
+                    self.scope_key_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+            except FileExistsError:
+                key = self.scope_key_path.read_bytes()
+            else:
+                with os.fdopen(descriptor, "wb") as key_file:
+                    key_file.write(generated)
+                key = generated
+        except OSError as error:
+            message = f"Could not read baseline scope key {self.scope_key_path}: {error}"
+            raise RuntimeError(message) from error
+        if len(key) != 32:
+            raise RuntimeError(f"Baseline scope key {self.scope_key_path} is invalid.")
+        return key
+
+    @staticmethod
+    def _v086_target_key(target: TargetConfig) -> str:
+        """Locate v0.8.6 credential-safe snapshot names during local migration."""
         return stable_hash(
             {"transport": target.transport, "identity": safe_target_identity(target)}
         )
@@ -81,16 +130,18 @@ class BaselineStore:
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            legacy_path = self.snapshot_dir / f"{self._legacy_target_key(target)}.json"
-            if legacy_path == path:
-                return None
-            try:
-                return json.loads(legacy_path.read_text(encoding="utf-8"))
-            except FileNotFoundError:
-                return None
-            except (OSError, json.JSONDecodeError) as error:
-                message = f"Could not read baseline snapshot {legacy_path}: {error}"
-                raise RuntimeError(message) from error
+            for key in (self._v086_target_key(target), self._legacy_target_key(target)):
+                legacy_path = self.snapshot_dir / f"{key}.json"
+                if legacy_path == path:
+                    continue
+                try:
+                    return json.loads(legacy_path.read_text(encoding="utf-8"))
+                except FileNotFoundError:
+                    continue
+                except (OSError, json.JSONDecodeError) as error:
+                    message = f"Could not read baseline snapshot {legacy_path}: {error}"
+                    raise RuntimeError(message) from error
+            return None
         except (OSError, json.JSONDecodeError) as error:
             raise RuntimeError(f"Could not read baseline snapshot {path}: {error}") from error
 
@@ -137,7 +188,7 @@ class BaselineStore:
         descriptor_hashes = {item.key: stable_hash(item) for item in descriptors}
         descriptor_field_hashes = {item.key: _field_hashes(item) for item in descriptors}
         payload = {
-            "version": 3,
+            "version": 4,
             "target": {"transport": target.transport, "identity": safe_target_identity(target)},
             "captured_at": datetime.now(UTC).isoformat(),
             "definition_fingerprint": definition_fingerprint(target, descriptors),

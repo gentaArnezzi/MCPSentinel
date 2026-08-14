@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .discovery import _session_for
+from .discovery import _client_for
 from .models import (
     Category,
     DescriptorKind,
@@ -144,8 +144,7 @@ async def run_dynamic_validation(
             with tempfile.TemporaryDirectory(prefix="mcpsentinel-dynamic-") as temporary_dir:
                 cidfile = Path(temporary_dir) / "container-id"
                 target = sandbox_target(config, cidfile=cidfile)
-                async with _session_for(target) as session:
-                    await session.initialize()
+                async with _client_for(target) as session:
                     container_id = await _wait_for_container_id(cidfile)
                     telemetry_before = await _capture_telemetry(container_id)
                     observation, response_finding = await _invoke(

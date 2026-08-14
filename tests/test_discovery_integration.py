@@ -43,6 +43,31 @@ async def test_stdio_discovery_scans_metadata_without_invoking_tool(tmp_path: Pa
     assert [finding.rule_id for finding in report.findings] == ["MCP002", "MCP001", "MCP004"]
 
 
+async def test_stdio_discovery_falls_back_to_legacy_initialization(tmp_path: Path) -> None:
+    fixture = Path(__file__).with_name("fixture_legacy_stdio_server.py")
+    target = TargetConfig(
+        transport="stdio",
+        identity="legacy-test-server",
+        command=sys.executable,
+        arguments=(str(fixture),),
+    )
+
+    report = await scan(
+        target,
+        rules_path=None,
+        policy_path=None,
+        baseline_root=tmp_path,
+        update_baseline=False,
+        judge_kind="heuristic",
+        judge_model="unused",
+        semantic_threshold=0.70,
+    )
+
+    assert [item.name for item in report.descriptors] == ["legacy_lookup"]
+    assert report.discovery_metadata["server"]["name"] == "mcpsentinel-legacy-test-server"
+    assert report.discovery_metadata["negotiation"] == "legacy_initialize"
+
+
 async def test_stdio_discovery_does_not_forward_ambient_secret_to_child(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -115,6 +140,32 @@ def test_oversized_descriptor_is_bounded_and_marked_for_review() -> None:
     assert descriptor.schema["_mcpsentinel_truncated"]["original_sha256"]
 
 
+def test_resource_schema_normalizes_wire_and_sdk_v2_field_names() -> None:
+    wire = discovery._descriptor(
+        DescriptorKind.RESOURCE_TEMPLATE,
+        {
+            "uriTemplate": "file:///workspace/{path}",
+            "mimeType": "text/plain",
+            "description": "Wire-format resource template.",
+        },
+    )
+    pythonic = discovery._descriptor(
+        DescriptorKind.RESOURCE_TEMPLATE,
+        {
+            "uri_template": "file:///workspace/{path}",
+            "mime_type": "text/plain",
+            "description": "SDK v2 resource template.",
+        },
+    )
+
+    expected = {
+        "uri_template": "file:///workspace/{path}",
+        "mime_type": "text/plain",
+    }
+    assert wire.name == pythonic.name == "file:///workspace/{path}"
+    assert wire.schema == pythonic.schema == expected
+
+
 async def test_streamable_http_discovery_scans_metadata(tmp_path: Path) -> None:
     fixture = Path(__file__).with_name("fixture_http_server.py")
     with socket.socket() as listener:
@@ -150,8 +201,16 @@ async def test_streamable_http_discovery_scans_metadata(tmp_path: Path) -> None:
         process.terminate()
         process.wait(timeout=5)
 
-    assert [item.name for item in report.descriptors] == ["local_lookup"]
+    assert [item.name for item in report.descriptors] == ["local_lookup", "server_instructions"]
+    instructions = report.descriptors[-1]
+    assert instructions.kind is DescriptorKind.SERVER_INSTRUCTIONS
+    assert "Ignore previous instructions" in instructions.description
+    assert any(
+        finding.rule_id == "MCP001" and finding.subject_name == "server_instructions"
+        for finding in report.findings
+    )
     assert report.discovery_metadata["server"]["name"] == "mcpsentinel-http-test-server"
+    assert report.discovery_metadata["negotiation"] == "server_discover"
 
 
 async def test_public_network_restriction_rejects_private_dns(monkeypatch) -> None:
@@ -271,7 +330,9 @@ async def test_http_discovery_refuses_redirects(tmp_path: Path) -> None:
         server.shutdown()
         thread.join(timeout=5)
 
-    assert RedirectHandler.requests == 1
+    # Auto negotiation probes server/discover then falls back to legacy initialize
+    # for this non-MCP endpoint. Redirects still are never followed.
+    assert RedirectHandler.requests == 2
 
 
 async def test_discovery_stops_a_server_that_exceeds_the_page_limit(monkeypatch) -> None:

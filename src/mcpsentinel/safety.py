@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import unquote_plus, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, unquote_plus, urlsplit, urlunsplit
 
 from .models import TargetConfig, to_primitive
 
@@ -13,7 +13,7 @@ _SENSITIVE_FIELD = re.compile(
     r"credential|password|private[_-]?key|secret|session|token)",
     re.IGNORECASE,
 )
-_URL = re.compile(r"https?://[^\s'\"<>]+", re.IGNORECASE)
+_URI = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"<>]+")
 _SENSITIVE_REPLACEMENTS = (
     (re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}\b"), "[REDACTED_OPENAI_KEY]"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"), "[REDACTED_GITHUB_TOKEN]"),
@@ -47,7 +47,7 @@ _SENSITIVE_REPLACEMENTS = (
 
 
 def sanitize_url(value: str) -> str:
-    """Remove URL credentials and redact sensitive query values for reports."""
+    """Remove URI credentials and redact secret-shaped path/query values."""
     try:
         parsed = urlsplit(value)
     except ValueError:
@@ -67,22 +67,30 @@ def sanitize_url(value: str) -> str:
         except ValueError:
             return value
         netloc = f"{host}:{port}" if port is not None else host
-    return urlunsplit((parsed.scheme, netloc, parsed.path, _sanitize_query(parsed.query), ""))
+    return urlunsplit(
+        (
+            parsed.scheme,
+            netloc,
+            _sanitize_uri_component(parsed.path),
+            _sanitize_query(parsed.query),
+            "",
+        )
+    )
 
 
 def sanitize_text(value: str) -> str:
-    """Redact credential-shaped strings and credentials embedded in HTTP URLs."""
-    urls: list[str] = []
+    """Redact credential-shaped strings and userinfo in any URI scheme."""
+    uris: list[str] = []
 
-    def replace_url(match: re.Match[str]) -> str:
-        urls.append(sanitize_url(match.group(0)))
-        return f"\x00MCPSENTINEL_SAFE_URL_{len(urls) - 1}\x00"
+    def replace_uri(match: re.Match[str]) -> str:
+        uris.append(sanitize_url(match.group(0)))
+        return f"\x00MCPSENTINEL_SAFE_URI_{len(uris) - 1}\x00"
 
-    redacted = _URL.sub(replace_url, value)
+    redacted = _URI.sub(replace_uri, value)
     for pattern, replacement in _SENSITIVE_REPLACEMENTS:
         redacted = pattern.sub(replacement, redacted)
-    for index, url in enumerate(urls):
-        redacted = redacted.replace(f"\x00MCPSENTINEL_SAFE_URL_{index}\x00", url)
+    for index, uri in enumerate(uris):
+        redacted = redacted.replace(f"\x00MCPSENTINEL_SAFE_URI_{index}\x00", uri)
     return redacted
 
 
@@ -151,14 +159,36 @@ def _safe_command_arguments(arguments: tuple[str, ...]) -> list[str]:
 
 
 def _sanitize_query(query: str) -> str:
-    """Keep non-sensitive parameters while replacing values for sensitive keys."""
+    """Keep safe parameters while replacing sensitive keys and token-shaped values."""
     if not query:
         return query
     sanitized: list[str] = []
     for part in query.split("&"):
-        key, separator, _ = part.partition("=")
+        key, separator, raw_value = part.partition("=")
         if _SENSITIVE_FIELD.search(unquote_plus(key)):
             sanitized.append(f"{key}=[REDACTED]")
-        else:
+            continue
+        if not separator:
             sanitized.append(part)
+            continue
+        safe_value = _sanitize_uri_component(raw_value, decode_query_value=True)
+        sanitized.append(f"{key}={safe_value}" if safe_value != raw_value else part)
     return "&".join(sanitized)
+
+
+def _sanitize_uri_component(value: str, *, decode_query_value: bool = False) -> str:
+    """Redact tokens in a URI component without changing safe text byte-for-byte."""
+    decoded = unquote_plus(value) if decode_query_value else unquote(value)
+    redacted = _redact_token_shapes(decoded)
+    redacted = _URI.sub(lambda match: sanitize_url(match.group(0)), redacted)
+    if redacted == decoded:
+        return value
+    return quote(redacted, safe="/:?&=[]-._~!$'()*+,;@")
+
+
+def _redact_token_shapes(value: str) -> str:
+    """Apply standalone credential detectors inside URI components."""
+    redacted = value
+    for pattern, replacement in _SENSITIVE_REPLACEMENTS[:4]:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted

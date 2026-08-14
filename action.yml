@@ -102,10 +102,22 @@ runs:
         python -m pip install --require-hashes -r "$GITHUB_ACTION_PATH/requirements.lock"
         python -m pip install --no-deps --no-build-isolation "$GITHUB_ACTION_PATH"
         python -m pip check
-        command=(scan "$INPUT_TARGET" --transport "$INPUT_TRANSPORT" --format sarif --output "$INPUT_REPORT_PATH" --baseline-dir "$INPUT_BASELINE_DIR" --judge "$INPUT_JUDGE" --fail-on "$INPUT_FAIL_ON")
+        effective_fail_on="$INPUT_FAIL_ON"
+        if [[ -n "$INPUT_APPROVE_BASELINE_FINGERPRINT" ]]; then
+          # Approval is a reviewed state transition, not a policy-enforcement run.
+          # The scan still produces SARIF and a fingerprint before rediscovery.
+          effective_fail_on="none"
+        fi
+        command=(scan "$INPUT_TARGET" --transport "$INPUT_TRANSPORT" --format sarif --output "$INPUT_REPORT_PATH" --baseline-dir "$INPUT_BASELINE_DIR" --judge "$INPUT_JUDGE" --fail-on "$effective_fail_on")
         if [[ -n "$INPUT_RULES" ]]; then command+=(--rules "$INPUT_RULES"); fi
         if [[ -n "$INPUT_POLICY" ]]; then command+=(--policy "$INPUT_POLICY"); fi
+        set +e
         mcpsentinel "${command[@]}"
+        scan_status=$?
+        set -e
+        if (( scan_status >= 2 )); then
+          exit "$scan_status"
+        fi
         fingerprint="$(python - "$INPUT_REPORT_PATH" <<'PY'
         import json
         import sys
@@ -120,6 +132,7 @@ runs:
           approval=(baseline approve "$INPUT_TARGET" --transport "$INPUT_TRANSPORT" --baseline-dir "$INPUT_BASELINE_DIR" --fingerprint "$INPUT_APPROVE_BASELINE_FINGERPRINT")
           mcpsentinel "${approval[@]}"
         fi
+        exit "$scan_status"
     - name: Save updated MCPSentinel baseline cache
       if: ${{ success() }}
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

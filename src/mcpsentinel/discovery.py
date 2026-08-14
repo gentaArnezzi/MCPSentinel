@@ -15,8 +15,7 @@ from urllib.parse import urlparse
 
 import httpcore2
 import httpx2
-from mcp import ClientSession, StdioServerParameters
-from mcp import types as mcp_types
+from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
@@ -195,7 +194,13 @@ def _as_dict(value: Any) -> dict[str, Any]:
 
 def _descriptor(kind: DescriptorKind, item: Any) -> ToolDescriptor:
     value = _as_dict(item)
-    name = str(value.pop("name", None) or value.get("uri", "unnamed"))
+    name = str(
+        value.pop("name", None)
+        or value.get("uri")
+        or value.get("uriTemplate")
+        or value.get("uri_template")
+        or "unnamed"
+    )
     description = str(value.pop("description", "") or "")
 
     if kind is DescriptorKind.TOOL:
@@ -203,11 +208,25 @@ def _descriptor(kind: DescriptorKind, item: Any) -> ToolDescriptor:
     elif kind is DescriptorKind.PROMPT:
         schema = {"arguments": value.pop("arguments", [])}
     else:
-        schema = {
-            key: value.pop(key) for key in list(value) if key in {"uri", "uriTemplate", "mimeType"}
-        }
+        schema = _resource_schema(value)
 
     return _bounded_descriptor(kind, name, description, schema, value)
+
+
+def _resource_schema(value: dict[str, Any]) -> dict[str, Any]:
+    """Canonicalize wire aliases and SDK v2 Python names for resource metadata."""
+    aliases = {
+        "uri": ("uri",),
+        "uri_template": ("uri_template", "uriTemplate"),
+        "mime_type": ("mime_type", "mimeType"),
+    }
+    schema: dict[str, Any] = {}
+    for canonical, names in aliases.items():
+        for name in names:
+            if name in value:
+                schema[canonical] = value.pop(name)
+                break
+    return schema
 
 
 def _bounded_descriptor(
@@ -315,7 +334,8 @@ def _truncation_marker(value: Any) -> dict[str, object]:
 
 
 @asynccontextmanager
-async def _session_for(target: TargetConfig) -> AsyncIterator[ClientSession]:
+async def _client_for(target: TargetConfig) -> AsyncIterator[Client]:
+    """Connect with SDK v2 auto-negotiation over the scanner's hardened transports."""
     if target.transport == "http":
         if not target.url:
             raise DiscoveryError("HTTP targets require a URL.")
@@ -323,9 +343,9 @@ async def _session_for(target: TargetConfig) -> AsyncIterator[ClientSession]:
             target.url, public_only=target.restrict_to_public_network
         )
         async with _http_client(target.url, pinned_addresses) as http_client:
-            async with streamable_http_client(target.url, http_client=http_client) as (read, write):
-                async with ClientSession(read, write) as session:
-                    yield session
+            transport = streamable_http_client(target.url, http_client=http_client)
+            async with Client(transport, mode="auto", cache=None) as client:
+                yield client
         return
 
     if target.transport != "stdio" or not target.command:
@@ -337,9 +357,8 @@ async def _session_for(target: TargetConfig) -> AsyncIterator[ClientSession]:
         args=list(target.arguments),
         env=environment,
     )
-    async with stdio_client(parameters) as (read, write):
-        async with ClientSession(read, write) as session:
-            yield session
+    async with Client(stdio_client(parameters), mode="auto", cache=None) as client:
+        yield client
 
 
 def _stdio_environment(target: TargetConfig) -> dict[str, str]:
@@ -447,13 +466,12 @@ async def _require_public_http_destination(url: str) -> tuple[str, ...]:
     return await _resolve_http_destination(url, public_only=True)
 
 
-async def _all_pages(session_method: Any, item_field: str) -> list[Any]:
+async def _all_pages(client_method: Any, item_field: str) -> list[Any]:
     """Collect a protocol-paginated descriptor list without making tool calls."""
     cursor: str | None = None
     items: list[Any] = []
     for _ in range(MAX_DESCRIPTOR_PAGES):
-        params = mcp_types.PaginatedRequestParams(cursor=cursor) if cursor else None
-        response = await session_method(params=params)
+        response = await client_method(cursor=cursor)
         items.extend(getattr(response, item_field, []))
         if len(items) > MAX_DESCRIPTORS_PER_CAPABILITY:
             raise DiscoveryError(
@@ -470,43 +488,53 @@ async def discover(target: TargetConfig) -> tuple[list[ToolDescriptor], dict[str
     """Initialize a session and enumerate metadata without calling any MCP tool."""
     try:
         async with asyncio.timeout(DISCOVERY_TIMEOUT_SECONDS):
-            async with _session_for(target) as session:
-                initialized = await session.initialize()
-                initialized_data = _as_dict(initialized)
-                capabilities = initialized_data.get("capabilities", {}) or {}
+            async with _client_for(target) as client:
+                capabilities = _as_dict(client.server_capabilities)
                 descriptors: list[ToolDescriptor] = []
 
                 if capabilities.get("tools") is not None:
-                    tools = await _all_pages(session.list_tools, "tools")
+                    tools = await _all_pages(client.list_tools, "tools")
                     descriptors.extend(_descriptor(DescriptorKind.TOOL, tool) for tool in tools)
                 if capabilities.get("prompts") is not None:
-                    prompts = await _all_pages(session.list_prompts, "prompts")
+                    prompts = await _all_pages(client.list_prompts, "prompts")
                     descriptors.extend(
                         _descriptor(DescriptorKind.PROMPT, prompt) for prompt in prompts
                     )
                 if capabilities.get("resources") is not None:
-                    server_resources = await _all_pages(session.list_resources, "resources")
+                    server_resources = await _all_pages(client.list_resources, "resources")
                     descriptors.extend(
                         _descriptor(DescriptorKind.RESOURCE, resource)
                         for resource in server_resources
                     )
                     # Templates share the resources capability and are optional
                     # in older SDK releases.
-                    if hasattr(session, "list_resource_templates"):
+                    if hasattr(client, "list_resource_templates"):
                         templates = await _all_pages(
-                            session.list_resource_templates, "resourceTemplates"
+                            client.list_resource_templates, "resourceTemplates"
                         )
                         descriptors.extend(
                             _descriptor(DescriptorKind.RESOURCE_TEMPLATE, item)
                             for item in templates
                         )
 
+                if client.instructions:
+                    descriptors.append(
+                        _bounded_descriptor(
+                            DescriptorKind.SERVER_INSTRUCTIONS,
+                            "server_instructions",
+                            client.instructions,
+                            {},
+                            {},
+                        )
+                    )
+                server_info = _as_dict(client.server_info) if client.server_info is not None else {}
                 metadata = {
-                    "server": initialized_data.get(
-                        "serverInfo", initialized_data.get("server_info", {})
-                    ),
-                    "protocol_version": initialized_data.get(
-                        "protocolVersion", initialized_data.get("protocol_version")
+                    "server": server_info,
+                    "protocol_version": client.protocol_version,
+                    "negotiation": (
+                        "server_discover"
+                        if client.session.discover_result is not None
+                        else "legacy_initialize"
                     ),
                 }
                 return descriptors, metadata
