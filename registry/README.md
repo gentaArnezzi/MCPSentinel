@@ -1,9 +1,19 @@
 # Official MCP Registry release metadata
 
-`server.json.template` is a release-ready template for the official MCP Registry’s PyPI package type. Before publishing, replace every `YOUR_GITHUB_USERNAME` placeholder, set the actual published package/version, and add the matching line below to the PyPI package README:
+`server.json` is the ready-to-submit metadata for the official MCP Registry’s PyPI package type. Its server name, repository URL, and package README ownership marker are already aligned with `gentaArnezzi/MCPSentinel`:
 
 ```html
-<!-- mcp-name: io.github.YOUR_GITHUB_USERNAME/mcpsentinel -->
+<!-- mcp-name: io.github.gentaArnezzi/mcpsentinel -->
 ```
 
-Then validate it with the current `mcp-publisher` tool, authenticate to the namespace you control, and publish. Registry publication is intentionally not automated here because it requires the owner’s PyPI and registry credentials and produces an externally visible, immutable release.
+For each release, update the package and registry versions together, build and upload the package to PyPI, then validate and submit the metadata:
+
+```bash
+uv build
+uvx twine check dist/*
+uvx twine upload dist/*
+mcp-publisher login github
+mcp-publisher publish registry/server.json
+```
+
+Registry publication is intentionally not automated here because it requires the owner’s PyPI and Registry credentials and produces an externally visible, immutable release.

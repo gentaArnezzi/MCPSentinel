@@ -1,10 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.YOUR_GITHUB_USERNAME/mcpsentinel",
+  "name": "io.github.gentaArnezzi/mcpsentinel",
   "title": "MCPSentinel",
   "description": "Precision-first security scanning for Model Context Protocol servers.",
   "repository": {
-    "url": "https://github.com/YOUR_GITHUB_USERNAME/MCPSentinel",
+    "url": "https://github.com/gentaArnezzi/MCPSentinel",
     "source": "github"
   },
   "version": "0.1.0",

@@ -1,5 +1,7 @@
 # MCPSentinel
 
+<!-- mcp-name: io.github.gentaArnezzi/mcpsentinel -->
+
 MCPSentinel is a precision-first security scanner for [Model Context Protocol](https://modelcontextprotocol.io/) servers. It treats a static rule hit as a candidate, then applies semantic intent analysis before reporting it. This keeps the fast coverage of pattern matching without making every normal-looking `fetch` or `delete` tool a noisy vulnerability.
 
 MCPSentinel now implements the PRD feature set:
@@ -157,7 +159,7 @@ Optional operator settings are `MCPSENTINEL_MCP_BASELINE_DIR`, `MCPSENTINEL_RULE
 
 ## Registry publication readiness
 
-The package and MCP metadata are prepared for PyPI plus the official MCP Registry. Before publishing, replace the identity placeholders in [registry/server.json.template](registry/server.json.template), publish the version to PyPI, add the matching `mcp-name` marker to the PyPI README, then authenticate and publish with `mcp-publisher`. The registry validates PyPI ownership through that README marker and requires a namespace matching the account used to authenticate; it does not host package artifacts itself. See [registry/README.md](registry/README.md) for the owner-specific steps and the official [package-type documentation](https://modelcontextprotocol.io/registry/package-types).
+The concrete [registry/server.json](registry/server.json) is prepared for PyPI plus the official MCP Registry. Before publishing a release, build and upload the matching package version to PyPI, then authenticate and submit that same `server.json` with `mcp-publisher`. The required hidden `mcp-name` marker is already in this README. The registry validates PyPI ownership through that marker and requires a namespace matching the account used to authenticate; it does not host package artifacts itself. See [registry/README.md](registry/README.md) for owner-specific commands and the official [package-type documentation](https://modelcontextprotocol.io/registry/package-types).
 
 ## Container image
 

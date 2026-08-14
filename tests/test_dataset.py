@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 from mcpsentinel.models import DescriptorKind, ToolDescriptor
@@ -29,9 +30,18 @@ async def test_vulnerable_by_design_dataset_matches_static_and_semantic_ground_t
             assert (await judge.assess(candidate)).label == case["semantic_outcome"]
 
 
-def test_registry_template_is_valid_json() -> None:
-    path = Path(__file__).parents[1] / "registry" / "server.json.template"
-    template = json.loads(path.read_text())
+def test_registry_metadata_is_concrete_and_valid_json() -> None:
+    root = Path(__file__).parents[1]
+    path = root / "registry" / "server.json"
+    metadata = json.loads(path.read_text())
+    project = tomllib.loads((root / "pyproject.toml").read_text())
 
-    assert template["packages"][0]["registryType"] == "pypi"
-    assert template["packages"][0]["transport"]["type"] == "stdio"
+    assert metadata["name"] == "io.github.gentaArnezzi/mcpsentinel"
+    assert "YOUR_GITHUB_USERNAME" not in json.dumps(metadata)
+    assert metadata["version"] == project["project"]["version"]
+    assert metadata["packages"][0]["version"] == project["project"]["version"]
+    assert metadata["packages"][0]["registryType"] == "pypi"
+    assert metadata["packages"][0]["transport"]["type"] == "stdio"
+    assert "<!-- mcp-name: io.github.gentaArnezzi/mcpsentinel -->" in (
+        root / "README.md"
+    ).read_text()
