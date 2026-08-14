@@ -58,6 +58,7 @@ def sandbox_target(config: DynamicConfig) -> TargetConfig:
     arguments = [
         "run",
         "--rm",
+        "--interactive",
         "--pull=never",
         "--network=none",
         "--read-only",

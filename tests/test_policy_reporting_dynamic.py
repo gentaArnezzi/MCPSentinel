@@ -91,6 +91,7 @@ def test_sandbox_target_has_no_network_mounts_or_privileges(monkeypatch) -> None
     )
     arguments = set(target.arguments)
 
+    assert "--interactive" in arguments
     assert "--network=none" in arguments
     assert "--read-only" in arguments
     assert "--cap-drop=ALL" in arguments

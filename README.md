@@ -115,6 +115,12 @@ mcpsentinel scan "python -m my_server" --transport stdio \
 
 The dynamic server image must already exist locally; MCPSentinel uses `--pull=never`. Docker is not needed for normal metadata scans. A dynamic response is retained only as a SHA-256 digest and content-type summary. If it resembles credential material, MCPSentinel reports `MCP-D001` without writing the response text to disk.
 
+The repository includes a deliberately local-only Docker fixture to verify this boundary end to end. It is excluded from the normal test suite because it needs a running Docker daemon and builds an image:
+
+```bash
+MCPSENTINEL_RUN_DOCKER_TESTS=1 pytest tests/test_dynamic_docker_e2e.py
+```
+
 ## GitHub Action
 
 The repository root is a composite GitHub Action. It installs MCPSentinel, restores a scoped baseline cache, emits SARIF, and fails at the selected severity. It does not enable dynamic testing.
@@ -167,6 +173,14 @@ The image intentionally has no Docker socket and cannot run the dynamic layer. R
 ## Dataset
 
 [datasets/vulnerable_by_design](datasets/vulnerable_by_design) holds controlled descriptor-level ground truth for regression tests across every default static rule plus a bounded safe control. It contains no live third-party targets or runnable destructive payloads.
+
+Run a reproducible accuracy and timing measurement with the offline judge:
+
+```bash
+mcpsentinel benchmark datasets/vulnerable_by_design/manifest.json --format json --output benchmark.json
+```
+
+The benchmark measures both raw static candidates and semantic findings against the dataset's expected reportable rules. It reports precision, recall, false-positive rate, F1, confusion-matrix counts, and stage timings. The bounded-fetch control intentionally counts as a static false positive but a semantic true negative, so regressions in noise suppression are visible in CI or release review. This is controlled regression evidence, not a general claim about production-server accuracy.
 
 ## Development
 

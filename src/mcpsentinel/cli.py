@@ -10,10 +10,12 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .benchmark import BenchmarkConfigurationError, benchmark_json, benchmark_text, run_benchmark
 from .discovery import DiscoveryError
 from .dynamic import DynamicConfig, DynamicInvocation, DynamicValidationError
 from .models import Severity, TargetConfig
 from .reporting import write_report
+from .semantic import build_judge
 from .service import reaches_fail_threshold, scan
 
 
@@ -98,6 +100,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dynamic_group.add_argument("--dynamic-timeout", type=_positive_seconds, default=10)
     dynamic_group.add_argument("--dynamic-confidence", type=_confidence, default=0.80)
+
+    benchmark_parser = commands.add_parser(
+        "benchmark", help="Measure static and semantic precision against a controlled dataset."
+    )
+    benchmark_parser.add_argument(
+        "dataset",
+        type=Path,
+        nargs="?",
+        default=Path("datasets/vulnerable_by_design/manifest.json"),
+        help="Controlled JSON dataset (default: datasets/vulnerable_by_design/manifest.json).",
+    )
+    benchmark_parser.add_argument(
+        "--rules", type=Path, help="JSON file with additive custom static rules."
+    )
+    benchmark_parser.add_argument(
+        "--judge",
+        choices=("auto", "heuristic", "openai"),
+        default="heuristic",
+        help="Semantic judge; heuristic is offline by default, while openai transmits metadata.",
+    )
+    benchmark_parser.add_argument("--judge-model", default="gpt-4o-mini")
+    benchmark_parser.add_argument("--semantic-threshold", type=_confidence, default=0.70)
+    benchmark_parser.add_argument("--format", choices=("text", "json"), default="text")
+    benchmark_parser.add_argument(
+        "--output", type=Path, help="Write the benchmark report to this path."
+    )
     return parser
 
 
@@ -156,7 +184,7 @@ def _target_from_args(args: argparse.Namespace) -> TargetConfig:
     )
 
 
-async def _run(args: argparse.Namespace) -> int:
+async def _run_scan(args: argparse.Namespace) -> int:
     target = _target_from_args(args)
     report = await scan(
         target,
@@ -173,6 +201,20 @@ async def _run(args: argparse.Namespace) -> int:
     print(rendered, end="")
     threshold = None if args.fail_on == "none" else Severity(args.fail_on)
     return 1 if reaches_fail_threshold(report, threshold) else 0
+
+
+async def _run_benchmark(args: argparse.Namespace) -> int:
+    report = await run_benchmark(
+        dataset_path=args.dataset,
+        judge=build_judge(args.judge, args.judge_model),
+        semantic_threshold=args.semantic_threshold,
+        rules_path=args.rules,
+    )
+    rendered = benchmark_json(report) if args.format == "json" else benchmark_text(report)
+    if args.output:
+        args.output.write_text(rendered, encoding="utf-8")
+    print(rendered, end="")
+    return 0
 
 
 def _dynamic_from_args(args: argparse.Namespace) -> DynamicConfig | None:
@@ -212,8 +254,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        return asyncio.run(_run(args))
-    except (DiscoveryError, DynamicValidationError, ValueError, RuntimeError) as error:
+        runner = _run_scan if args.command_name == "scan" else _run_benchmark
+        return asyncio.run(runner(args))
+    except (
+        BenchmarkConfigurationError,
+        DiscoveryError,
+        DynamicValidationError,
+        ValueError,
+        RuntimeError,
+    ) as error:
         print(f"mcpsentinel: error: {error}", file=sys.stderr)
         return 2
 
