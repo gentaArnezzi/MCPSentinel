@@ -20,6 +20,13 @@ from .reporting import write_report
 from .semantic import build_judge
 from .service import reaches_fail_threshold, scan
 
+_ONBOARDING_BANNER = """+----------------------------------------------------------------+
+|                          MCPSENTINEL                           |
+|       Security review for Model Context Protocol servers        |
+|                     Read-only by default                       |
++----------------------------------------------------------------+
+"""
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -189,7 +196,8 @@ def _onboarding_text(target: str | None = None, transport: str = "auto") -> str:
         if os.environ.get("OPENAI_API_KEY")
         else "No OpenAI key is needed for this first scan; the default heuristic judge is offline."
     )
-    return f"""Welcome to MCPSentinel {__version__}
+    return f"""{_ONBOARDING_BANNER}
+Welcome to MCPSentinel {__version__}
 
 MCPSentinel discovers MCP metadata, applies static security rules, and then
 triages candidate findings. A normal scan is read-only: it does not invoke

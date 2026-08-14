@@ -1,10 +1,75 @@
+<!-- mcp-name: io.github.gentaArnezzi/mcpsentinel -->
+
 # MCPSentinel
 
-<!-- mcp-name: io.github.gentaArnezzi/mcpsentinel -->
+<div align="center">
+
+<pre>
++----------------------------------------------------------------+
+|                          MCPSENTINEL                           |
+|       Security review for Model Context Protocol servers        |
+|                     Read-only by default                       |
++----------------------------------------------------------------+
+</pre>
+
+<p><strong>Discover MCP metadata. Triage suspicious intent. Review changes before you trust them.</strong></p>
+
+[![CI](https://github.com/gentaArnezzi/MCPSentinel/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gentaArnezzi/MCPSentinel/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/mcp-guardian-scan?label=PyPI)](https://pypi.org/project/mcp-guardian-scan/)
+[![Python](https://img.shields.io/pypi/pyversions/mcp-guardian-scan)](https://pypi.org/project/mcp-guardian-scan/)
+[![License](https://img.shields.io/github/license/gentaArnezzi/MCPSentinel)](LICENSE)
+[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-6A5ACD)](https://registry.modelcontextprotocol.io/)
+[![GitHub Action](https://img.shields.io/badge/GitHub%20Action-ready-2088FF?logo=githubactions)](https://github.com/gentaArnezzi/MCPSentinel)
+
+</div>
 
 MCPSentinel is a precision-first security scanner for [Model Context Protocol](https://modelcontextprotocol.io/) servers. It treats a static rule hit as a candidate, then applies semantic intent analysis before reporting it. This keeps the fast coverage of pattern matching without making every normal-looking `fetch` or `delete` tool a noisy vulnerability.
 
-MCPSentinel now implements the PRD feature set:
+## Start in 60 seconds
+
+```bash
+python -m pip install mcp-guardian-scan
+mcpsentinel                    # safe, no-write onboarding
+mcpsentinel scan http://localhost:8000/mcp
+```
+
+The first command you see is deliberately friendly and branded, while scan output stays free of decorative text when you select `json` or `sarif` for automation:
+
+```text
+$ mcpsentinel
++----------------------------------------------------------------+
+|                          MCPSENTINEL                           |
+|       Security review for Model Context Protocol servers        |
+|                     Read-only by default                       |
++----------------------------------------------------------------+
+
+Welcome to MCPSentinel 0.2.2
+
+1. Run your first offline scan:
+   mcpsentinel scan http://localhost:8000/mcp
+
+2. Save CI-friendly output and fail on high-severity findings:
+   mcpsentinel scan http://localhost:8000/mcp --format sarif --output results.sarif --fail-on high
+```
+
+| I want to… | Start here |
+| --- | --- |
+| inspect one local or remote server | [Scan a server](#scan-a-server) |
+| add a review gate to CI | [GitHub Action](#github-action) |
+| expose scanning to an AI client | [MCP-native scanner](#mcp-native-scanner) |
+| run it in a container | [Container image](#container-image) |
+| understand scope and limits | [What MCPSentinel can—and cannot—tell you](#what-mcpsentinel-canand-cannot-tell-you) |
+
+### The review loop
+
+```text
+discover metadata  ->  static candidates  ->  semantic triage  ->  human review
+                                                                        |
+                                                                        v
+                                                        explicitly approve baseline
+```
+
+## What you get
 
 - MCP discovery over stdio and Streamable HTTP
 - configurable static pattern rules for tool, prompt, and resource descriptors, including tool poisoning, shadowing, cross-server, and OAuth confused-deputy signals
@@ -17,7 +82,7 @@ MCPSentinel now implements the PRD feature set:
 
 Static scans are metadata-only. Dynamic invocation is a separate opt-in path described below and never runs from the GitHub Action or MCP-native server.
 
-## Install
+## Install and onboard
 
 Install the published package, then use the MCPSentinel CLI:
 
@@ -164,7 +229,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.2.1
+- uses: gentaArnezzi/MCPSentinel@v0.2.2
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -179,7 +244,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 Action scans preserve an approved baseline by default. Use `approve-baseline: "true"` only in a reviewed workflow on a protected branch, after the scan's output is accepted. Do not enable it for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.2.1
+- uses: gentaArnezzi/MCPSentinel@v0.2.2
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -213,8 +278,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.2.1
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.2.1 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.2.2
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.2.2 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:

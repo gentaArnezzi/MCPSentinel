@@ -8,6 +8,8 @@ def test_first_run_displays_safe_onboarding(capsys) -> None:
     assert main([]) == 0
 
     output = capsys.readouterr().out
+    assert "MCPSENTINEL" in output
+    assert "Read-only by default" in output
     assert f"Welcome to MCPSentinel {__version__}" in output
     assert "read-only" in output
     assert "mcpsentinel scan http://localhost:8000/mcp" in output
