@@ -22,6 +22,8 @@ jobs:
       - run: uv run pip-audit --requirement requirements.lock --strict --disable-pip
       - run: uv build
       - run: uv run twine check dist/*
+      - run: docker build --tag mcpsentinel:release-check .
+      - run: docker run --rm --read-only --user 10001:10001 mcpsentinel:release-check --version
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-package-distributions

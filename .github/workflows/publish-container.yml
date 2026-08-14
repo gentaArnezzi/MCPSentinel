@@ -23,10 +23,14 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-      - name: Build and publish versioned image
+      - name: Build and validate versioned image
         shell: bash
         run: |
           docker build --tag "${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}" .
+          docker run --rm --read-only --user 10001:10001 "${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}" --version
+      - name: Publish versioned image
+        shell: bash
+        run: |
           docker push "${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}"
       - name: Publish latest image tag
         if: ${{ !github.event.release.prerelease }}
