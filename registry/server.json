@@ -11,7 +11,7 @@
   "packages": [
     {
       "registryType": "pypi",
-      "identifier": "mcpsentinel",
+      "identifier": "mcp-guardian-scan",
       "version": "0.1.0",
       "transport": {
         "type": "stdio"

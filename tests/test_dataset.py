@@ -38,9 +38,11 @@ def test_registry_metadata_is_concrete_and_valid_json() -> None:
 
     assert metadata["name"] == "io.github.gentaArnezzi/mcpsentinel"
     assert "YOUR_GITHUB_USERNAME" not in json.dumps(metadata)
+    assert project["project"]["name"] == "mcp-guardian-scan"
     assert metadata["version"] == project["project"]["version"]
     assert metadata["packages"][0]["version"] == project["project"]["version"]
     assert metadata["packages"][0]["registryType"] == "pypi"
+    assert metadata["packages"][0]["identifier"] == project["project"]["name"]
     assert metadata["packages"][0]["transport"]["type"] == "stdio"
     assert "<!-- mcp-name: io.github.gentaArnezzi/mcpsentinel -->" in (
         root / "README.md"

@@ -6,11 +6,13 @@
 <!-- mcp-name: io.github.gentaArnezzi/mcpsentinel -->
 ```
 
+The public PyPI distribution is named `mcp-guardian-scan` because PyPI rejected `mcpsentinel` as confusable with an existing project. The product name, import package, and CLI remain MCPSentinel and `mcpsentinel` respectively.
+
 For the first release, configure the PyPI **pending** trusted publisher with these exact values:
 
 | Field | Value |
 | --- | --- |
-| PyPI Project Name | `mcpsentinel` |
+| PyPI Project Name | `mcp-guardian-scan` |
 | Owner | `gentaArnezzi` |
 | Repository name | `MCPSentinel` |
 | Workflow name | `publish.yml` |

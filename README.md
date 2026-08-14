@@ -19,6 +19,15 @@ Static scans are metadata-only. Dynamic invocation is a separate opt-in path des
 
 ## Install
 
+Install the published package, then use the MCPSentinel CLI:
+
+```bash
+python -m pip install mcp-guardian-scan
+mcpsentinel --help
+```
+
+For development from source:
+
 ```bash
 python -m venv .venv
 . .venv/bin/activate
