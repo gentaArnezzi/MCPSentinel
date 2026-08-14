@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shlex
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from . import __version__
 from .benchmark import BenchmarkConfigurationError, benchmark_json, benchmark_text, run_benchmark
 from .discovery import DiscoveryError
 from .dynamic import DynamicConfig, DynamicInvocation, DynamicValidationError
@@ -24,7 +26,23 @@ def build_parser() -> argparse.ArgumentParser:
         prog="mcpsentinel",
         description="Precision-first security scanning for Model Context Protocol servers.",
     )
-    commands = parser.add_subparsers(dest="command_name", required=True)
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    commands = parser.add_subparsers(dest="command_name")
+    onboarding_parser = commands.add_parser(
+        "onboard",
+        aliases=("init",),
+        help="Show a safe, guided first-scan walkthrough without writing files or reading secrets.",
+    )
+    onboarding_parser.add_argument(
+        "--target",
+        help="Optional target used only to print a scan command; no server is contacted.",
+    )
+    onboarding_parser.add_argument(
+        "--transport",
+        choices=("auto", "http", "stdio"),
+        default="auto",
+        help="Transport for the optional target (default: auto).",
+    )
     scan_parser = commands.add_parser("scan", help="Discover and scan MCP server metadata.")
     scan_parser.add_argument("target", help="HTTP MCP URL or a quoted stdio command.")
     scan_parser.add_argument("--transport", choices=("auto", "http", "stdio"), default="auto")
@@ -149,6 +167,51 @@ def _positive_seconds(raw: str) -> int:
     return value
 
 
+def _onboarding_text(target: str | None = None, transport: str = "auto") -> str:
+    """Return a copy-pasteable, no-write first-run guide for terminal users."""
+    if target:
+        chosen_transport = transport
+        if chosen_transport == "auto":
+            chosen_transport = "http" if urlparse(target).scheme in {"http", "https"} else "stdio"
+        first_scan = f"mcpsentinel scan {shlex.quote(target)} --transport {chosen_transport}"
+    else:
+        first_scan = "mcpsentinel scan http://localhost:8000/mcp"
+
+    openai_hint = (
+        "OPENAI_API_KEY is detected; use --judge auto only when metadata may be sent to OpenAI."
+        if os.environ.get("OPENAI_API_KEY")
+        else "No OpenAI key is needed for this first scan; the default heuristic judge is offline."
+    )
+    return f"""Welcome to MCPSentinel {__version__}
+
+MCPSentinel discovers MCP metadata, applies static security rules, and then
+triages candidate findings. A normal scan is read-only: it does not invoke
+server tools. Dynamic tool validation is a separate explicit opt-in.
+
+1. Run your first offline scan:
+   {first_scan}
+
+2. Save CI-friendly output and fail on high-severity findings:
+   {first_scan} --format sarif --output results.sarif --fail-on high
+
+3. Review the baseline diff on later scans. Baselines default to:
+   ~/.mcpsentinel/baselines
+
+4. Optional semantic review:
+   {openai_hint}
+   export OPENAI_API_KEY="..."
+   {first_scan} --judge openai --judge-model gpt-4o-mini
+
+Useful next commands:
+   mcpsentinel scan --help       # every scan option
+   mcpsentinel benchmark         # validate rules against the bundled dataset
+   mcpsentinel onboard --target "python -m my_mcp_server" --transport stdio
+
+Security note: never commit API keys. Keep --dynamic disabled unless you own
+the target and intentionally provide its local Docker image.
+"""
+
+
 def _target_from_args(args: argparse.Namespace) -> TargetConfig:
     parsed = urlparse(args.target)
     transport = args.transport
@@ -253,6 +316,12 @@ def _dynamic_from_args(args: argparse.Namespace) -> DynamicConfig | None:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command_name is None:
+        print(_onboarding_text(), end="")
+        return 0
+    if args.command_name in {"onboard", "init"}:
+        print(_onboarding_text(args.target, args.transport), end="")
+        return 0
     try:
         runner = _run_scan if args.command_name == "scan" else _run_benchmark
         return asyncio.run(runner(args))

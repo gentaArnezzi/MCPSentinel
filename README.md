@@ -23,8 +23,22 @@ Install the published package, then use the MCPSentinel CLI:
 
 ```bash
 python -m pip install mcp-guardian-scan
-mcpsentinel --help
+mcpsentinel
 ```
+
+Running `mcpsentinel` with no command starts a short, no-write terminal
+onboarding guide. It explains the read-only scan model, gives a copy-pasteable
+first scan, and keeps OpenAI optional. Use `mcpsentinel onboard` (or the alias
+`mcpsentinel init`) to show it again, or tailor the suggested command without
+contacting a server:
+
+```bash
+mcpsentinel onboard --target https://mcp.example.com/mcp
+mcpsentinel onboard --target "python -m example_mcp_server" --transport stdio
+```
+
+The onboarding flow never asks for, stores, or transmits an API key. Use
+`mcpsentinel --help` or `mcpsentinel scan --help` for the complete reference.
 
 For development from source:
 
