@@ -14,7 +14,7 @@ from typing import Any
 from . import __version__
 from .models import DescriptorKind, ToolDescriptor, to_primitive
 from .rules import StaticAnalyzer, load_rules
-from .semantic import SemanticJudge
+from .semantic import SERVER_INSTRUCTION_RULE_ID, SemanticJudge, server_instruction_candidates
 
 
 class BenchmarkConfigurationError(ValueError):
@@ -67,12 +67,17 @@ class BenchmarkReport:
     source_count: int
     rule_count: int
     static_candidate_count: int
+    semantic_assessment_count: int
     semantic_report_count: int
+    estimated_api_cost_usd: float | None
     static_duration_ms: int
     semantic_duration_ms: int
     static: ClassificationMetrics
     semantic: ClassificationMetrics
+    static_descriptors: ClassificationMetrics
+    semantic_descriptors: ClassificationMetrics
     per_category: dict[str, CategoryMetrics]
+    server_instruction_segments: dict[str, ClassificationMetrics]
     provenance_counts: dict[str, int]
 
 
@@ -103,12 +108,18 @@ def _rule_ids(value: Any, *, field: str, case_id: str) -> set[str]:
 
 def _descriptors_and_truth(
     manifest: dict[str, Any],
-) -> tuple[list[ToolDescriptor], dict[str, set[str]], dict[str, str]]:
+) -> tuple[
+    list[ToolDescriptor],
+    dict[str, set[str]],
+    dict[str, str],
+    dict[str, str],
+]:
     cases = _expanded_cases(manifest)
 
     descriptors: list[ToolDescriptor] = []
     expected_reported: dict[str, set[str]] = {}
     provenance_by_case: dict[str, str] = {}
+    segment_by_case: dict[str, str] = {}
     seen_ids: set[str] = set()
     for case in cases:
         if not isinstance(case, dict):
@@ -168,7 +179,18 @@ def _descriptors_and_truth(
         )
         expected_reported[case_id] = reported_rules
         provenance_by_case[case_id] = provenance
-    return descriptors, expected_reported, provenance_by_case
+        segment = case.get("segment")
+        if segment is not None:
+            if not isinstance(segment, str) or not segment:
+                raise BenchmarkConfigurationError(
+                    f"Case {case_id!r} needs segment as a non-empty string when present."
+                )
+            if kind is not DescriptorKind.SERVER_INSTRUCTIONS:
+                raise BenchmarkConfigurationError(
+                    f"Case {case_id!r} uses a server-instruction segment for another kind."
+                )
+            segment_by_case[case_id] = segment
+    return descriptors, expected_reported, provenance_by_case, segment_by_case
 
 
 def _dataset_metadata(manifest: dict[str, Any]) -> BenchmarkDatasetMetadata:
@@ -244,7 +266,7 @@ def _dataset_metadata(manifest: dict[str, Any]) -> BenchmarkDatasetMetadata:
         if not isinstance(source.get("case_count"), int) or source["case_count"] < 1:
             raise BenchmarkConfigurationError(
                 f"Version {version} source {source_id!r} needs a positive case_count."
-        )
+            )
         if version == 3 and (
             not isinstance(source.get("authorization"), str) or not source["authorization"]
         ):
@@ -438,6 +460,25 @@ def _metrics(
     )
 
 
+def _descriptor_metrics(
+    predictions: set[tuple[str, str]], expected: dict[str, set[str]]
+) -> ClassificationMetrics:
+    """One decision per descriptor: does it produce any reportable signal?
+
+    This complements, rather than replaces, exact rule-pair metrics: detecting
+    the wrong rule on a positive descriptor still looks positive at this level.
+    """
+    predicted = {case_id for case_id, _ in predictions}
+    positive = {case_id for case_id, rules in expected.items() if rules}
+    universe = set(expected)
+    return ClassificationMetrics(
+        true_positive=len(predicted & positive),
+        false_positive=len(predicted - positive),
+        true_negative=len(universe - predicted - positive),
+        false_negative=len(positive - predicted),
+    )
+
+
 async def run_benchmark(
     dataset_path: Path,
     judge: SemanticJudge,
@@ -462,13 +503,16 @@ async def run_benchmark(
         raise BenchmarkConfigurationError("Semantic threshold must be from 0 to 1.")
 
     metadata = _dataset_metadata(manifest)
-    descriptors, expected_reported, provenance_by_case = _descriptors_and_truth(manifest)
+    descriptors, expected_reported, provenance_by_case, segment_by_case = _descriptors_and_truth(
+        manifest
+    )
     rules = load_rules(rules_path)
     analyzer = StaticAnalyzer(rules)
-    rule_ids = {rule.id for rule in rules}
+    rule_ids = {rule.id for rule in rules} | {SERVER_INSTRUCTION_RULE_ID}
     category_rule_ids: dict[str, set[str]] = {}
     for rule in rules:
         category_rule_ids.setdefault(rule.category.value, set()).add(rule.id)
+    category_rule_ids.setdefault("prompt_injection", set()).add(SERVER_INSTRUCTION_RULE_ID)
 
     static_started = time.perf_counter()
     candidates = analyzer.analyze(descriptors)
@@ -479,9 +523,14 @@ async def run_benchmark(
     }
     static_predictions = set(candidates_by_key)
 
+    semantic_candidates = [*candidates, *server_instruction_candidates(descriptors)]
+    semantic_candidates_by_key = {
+        (candidate.descriptor.metadata["benchmark_case_id"], candidate.rule_id): candidate
+        for candidate in semantic_candidates
+    }
     semantic_started = time.perf_counter()
     semantic_predictions: set[tuple[str, str]] = set()
-    for key, candidate in candidates_by_key.items():
+    for key, candidate in semantic_candidates_by_key.items():
         verdict = await judge.assess(candidate)
         if verdict.should_report and verdict.confidence >= semantic_threshold:
             semantic_predictions.add(key)
@@ -498,13 +547,17 @@ async def run_benchmark(
         case_count=len(descriptors),
         labeled_positive_count=sum(len(rule_ids) for rule_ids in expected_reported.values()),
         source_count=metadata.source_count,
-        rule_count=len(rules),
+        rule_count=len(rule_ids),
         static_candidate_count=len(static_predictions),
+        semantic_assessment_count=len(semantic_candidates_by_key),
         semantic_report_count=len(semantic_predictions),
+        estimated_api_cost_usd=getattr(judge, "estimated_cost_usd", None),
         static_duration_ms=static_duration_ms,
         semantic_duration_ms=semantic_duration_ms,
         static=_metrics(static_predictions, expected_reported, rule_ids),
         semantic=_metrics(semantic_predictions, expected_reported, rule_ids),
+        static_descriptors=_descriptor_metrics(static_predictions, expected_reported),
+        semantic_descriptors=_descriptor_metrics(semantic_predictions, expected_reported),
         per_category={
             category: CategoryMetrics(
                 static=_metrics(
@@ -526,6 +579,28 @@ async def run_benchmark(
             )
             for category, category_rules in sorted(category_rule_ids.items())
         },
+        server_instruction_segments={
+            segment: _metrics(
+                {
+                    item
+                    for item in semantic_predictions
+                    if item[0] in segment_cases and item[1] == SERVER_INSTRUCTION_RULE_ID
+                },
+                {
+                    case_id: expected_reported[case_id] & {SERVER_INSTRUCTION_RULE_ID}
+                    for case_id in segment_cases
+                },
+                {SERVER_INSTRUCTION_RULE_ID},
+            )
+            for segment in sorted(set(segment_by_case.values()))
+            for segment_cases in [
+                {
+                    case_id
+                    for case_id, case_segment in segment_by_case.items()
+                    if case_segment == segment
+                }
+            ]
+        },
         provenance_counts={
             provenance: sum(item == provenance for item in provenance_by_case.values())
             for provenance in sorted(set(provenance_by_case.values()))
@@ -546,12 +621,18 @@ def benchmark_json(report: BenchmarkReport) -> str:
     payload = to_primitive(report)
     payload["static"] = metrics_payload(report.static)
     payload["semantic"] = metrics_payload(report.semantic)
+    payload["static_descriptors"] = metrics_payload(report.static_descriptors)
+    payload["semantic_descriptors"] = metrics_payload(report.semantic_descriptors)
     payload["per_category"] = {
         category: {
             "static": metrics_payload(metrics.static),
             "semantic": metrics_payload(metrics.semantic),
         }
         for category, metrics in report.per_category.items()
+    }
+    payload["server_instruction_segments"] = {
+        segment: metrics_payload(metrics)
+        for segment, metrics in report.server_instruction_segments.items()
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
@@ -573,6 +654,13 @@ def benchmark_text(report: BenchmarkReport) -> str:
         f"{summary('semantic', metrics.semantic)}"
         for category, metrics in report.per_category.items()
     )
+    instruction_segments = tuple(
+        f"  {segment}: {summary('semantic MCP-S001', metrics)}"
+        for segment, metrics in report.server_instruction_segments.items()
+    )
+    estimated_cost = (
+        "n/a" if report.estimated_api_cost_usd is None else f"${report.estimated_api_cost_usd:.6f}"
+    )
     return "\n".join(
         (
             f"Benchmark dataset: {report.dataset}",
@@ -585,20 +673,26 @@ def benchmark_text(report: BenchmarkReport) -> str:
                 f"labelled positive pairs: {report.labeled_positive_count}; "
                 f"source records: {report.source_count}"
             ),
+            "Rule-pair metrics (not independent server observations):",
             summary("Static candidates", report.static),
             summary("Semantic findings", report.semantic),
+            "Descriptor metrics (any finding; exact rule correctness is measured above):",
+            summary("Static descriptors", report.static_descriptors),
+            summary("Semantic descriptors", report.semantic_descriptors),
             "Provenance: "
             + ", ".join(
-                f"{provenance}={count}"
-                for provenance, count in report.provenance_counts.items()
+                f"{provenance}={count}" for provenance, count in report.provenance_counts.items()
             ),
             "Per category:",
             *categories,
+            "Server instruction segments:",
+            *(instruction_segments or ("  none",)),
             (
                 "Timing: "
                 f"static={report.static_duration_ms}ms, semantic={report.semantic_duration_ms}ms; "
-                f"candidates={report.static_candidate_count}, "
-                f"reported={report.semantic_report_count}"
+                f"static_candidates={report.static_candidate_count}, "
+                f"semantic_assessments={report.semantic_assessment_count}, "
+                f"reported={report.semantic_report_count}, estimated_api_cost={estimated_cost}"
             ),
             "",
         )

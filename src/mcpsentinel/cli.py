@@ -501,6 +501,7 @@ async def _run_benchmark(args: argparse.Namespace) -> int:
     )
     rendered = benchmark_json(report) if args.format == "json" else benchmark_text(report)
     if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")
     print(rendered, end="")
     return 0
@@ -559,6 +560,7 @@ def main(argv: list[str] | None = None) -> int:
         BenchmarkConfigurationError,
         DiscoveryError,
         DynamicValidationError,
+        OSError,
         ValueError,
         RuntimeError,
     ) as error:

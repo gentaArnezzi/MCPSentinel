@@ -49,9 +49,9 @@ def test_registry_metadata_is_concrete_and_valid_json() -> None:
     assert metadata["packages"][0]["registryType"] == "pypi"
     assert metadata["packages"][0]["identifier"] == project["project"]["name"]
     assert metadata["packages"][0]["transport"]["type"] == "stdio"
-    assert "<!-- mcp-name: io.github.gentaArnezzi/mcpsentinel -->" in (
-        root / "README.md"
-    ).read_text()
+    assert (
+        "<!-- mcp-name: io.github.gentaArnezzi/mcpsentinel -->" in (root / "README.md").read_text()
+    )
     workflow = (root / ".github" / "workflows" / "publish.yml").read_text()
     assert "id-token: write" in workflow
     assert "name: pypi" in workflow
@@ -73,8 +73,7 @@ def test_curated_public_metadata_dataset_has_pinned_sources_and_literal_cases() 
         "maintainer-reviewed; independent-review-pending"
     )
     source_summary = [
-        (source["id"], source["case_count"], source["license"])
-        for source in manifest["sources"]
+        (source["id"], source["case_count"], source["license"]) for source in manifest["sources"]
     ]
     assert source_summary == [
         ("aws", 329, "Apache-2.0"),
@@ -136,3 +135,26 @@ def test_authorized_positive_dataset_has_pinned_source_and_authorized_labels() -
         }
         assert case["source"]["line"] > 0
         assert len(case["source"]["sha256"]) == 64
+
+
+def test_server_instruction_dataset_has_required_balanced_segments() -> None:
+    root = Path(__file__).parents[1]
+    manifest = json.loads(
+        (root / "datasets" / "server_instructions_v4" / "manifest.json").read_text()
+    )
+
+    cases = manifest["cases"]
+    assert len(cases) == 28
+    segments = {
+        segment: [case for case in cases if case["segment"] == segment]
+        for segment in {case["segment"] for case in cases}
+    }
+    assert {segment: len(items) for segment, items in segments.items()} == {
+        "english": 10,
+        "non_english": 10,
+        "obfuscated": 4,
+        "ambiguous": 4,
+    }
+    assert sum(not case["expected_reported_rules"] for case in segments["english"]) == 5
+    assert sum(not case["expected_reported_rules"] for case in segments["non_english"]) == 5
+    assert all(case["kind"] == "server_instructions" for case in cases)

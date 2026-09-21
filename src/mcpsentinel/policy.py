@@ -76,7 +76,9 @@ class ScanPolicy:
             subject_name=candidate.descriptor.name,
             evidence=candidate.evidence,
             confidence=1.0,
-            layers=("static", "policy"),
+            layers=("semantic", "policy")
+            if candidate.rule_id.startswith("MCP-S")
+            else ("static", "policy"),
             rationale=(
                 "An explicit MCPSentinel policy deny selector requires this finding to be reported."
             ),

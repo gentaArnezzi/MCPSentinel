@@ -1,0 +1,264 @@
+{
+  "case_count": 200,
+  "dataset": "datasets/vulnerable_by_design/manifest.json",
+  "dataset_sha256": "5e3352cddc5be0102779113c8992b44817c626fe5d2b533f4a353a0ec94c92fb",
+  "dataset_version": 1,
+  "estimated_api_cost_usd": 0.0,
+  "evaluation_scope": "controlled-synthetic-regression",
+  "judge": "heuristic-v4",
+  "labeled_positive_count": 142,
+  "per_category": {
+    "command_execution": {
+      "semantic": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 179,
+        "true_positive": 21
+      },
+      "static": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 179,
+        "true_positive": 21
+      }
+    },
+    "cross_server_attack": {
+      "semantic": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 187,
+        "true_positive": 13
+      },
+      "static": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 187,
+        "true_positive": 13
+      }
+    },
+    "destructive_operation": {
+      "semantic": {
+        "f1": 0.9565217391304348,
+        "false_negative": 1,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.9166666666666666,
+        "true_negative": 188,
+        "true_positive": 11
+      },
+      "static": {
+        "f1": 0.9565217391304348,
+        "false_negative": 1,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.9166666666666666,
+        "true_negative": 188,
+        "true_positive": 11
+      }
+    },
+    "oauth_confused_deputy": {
+      "semantic": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 188,
+        "true_positive": 12
+      },
+      "static": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 188,
+        "true_positive": 12
+      }
+    },
+    "prompt_injection": {
+      "semantic": {
+        "f1": 0.92,
+        "false_negative": 4,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.8518518518518519,
+        "true_negative": 373,
+        "true_positive": 23
+      },
+      "static": {
+        "f1": 0.8979591836734693,
+        "false_negative": 5,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.8148148148148148,
+        "true_negative": 373,
+        "true_positive": 22
+      }
+    },
+    "secret_exfiltration": {
+      "semantic": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 179,
+        "true_positive": 21
+      },
+      "static": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 179,
+        "true_positive": 21
+      }
+    },
+    "ssrf": {
+      "semantic": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 188,
+        "true_positive": 12
+      },
+      "static": {
+        "f1": 0.7058823529411764,
+        "false_negative": 0,
+        "false_positive": 10,
+        "false_positive_rate": 0.05319148936170213,
+        "precision": 0.5454545454545454,
+        "recall": 1.0,
+        "true_negative": 178,
+        "true_positive": 12
+      }
+    },
+    "tool_poisoning": {
+      "semantic": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 188,
+        "true_positive": 12
+      },
+      "static": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 188,
+        "true_positive": 12
+      }
+    },
+    "tool_shadowing": {
+      "semantic": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 188,
+        "true_positive": 12
+      },
+      "static": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_negative": 188,
+        "true_positive": 12
+      }
+    }
+  },
+  "provenance_counts": {
+    "hand-curated-synthetic": 35,
+    "synthetic-template": 165
+  },
+  "rule_count": 10,
+  "scanner_version": "0.8.8",
+  "semantic": {
+    "f1": 0.982078853046595,
+    "false_negative": 5,
+    "false_positive": 0,
+    "false_positive_rate": 0.0,
+    "precision": 1.0,
+    "recall": 0.9647887323943662,
+    "true_negative": 1858,
+    "true_positive": 137
+  },
+  "semantic_assessment_count": 147,
+  "semantic_descriptors": {
+    "f1": 0.9818181818181818,
+    "false_negative": 5,
+    "false_positive": 0,
+    "false_positive_rate": 0.0,
+    "precision": 1.0,
+    "recall": 0.9642857142857143,
+    "true_negative": 60,
+    "true_positive": 135
+  },
+  "semantic_duration_ms": 4,
+  "semantic_report_count": 137,
+  "semantic_threshold": 0.7,
+  "server_instruction_segments": {},
+  "source_count": 0,
+  "static": {
+    "f1": 0.9444444444444444,
+    "false_negative": 6,
+    "false_positive": 10,
+    "false_positive_rate": 0.005382131324004306,
+    "precision": 0.9315068493150684,
+    "recall": 0.9577464788732394,
+    "true_negative": 1848,
+    "true_positive": 136
+  },
+  "static_candidate_count": 146,
+  "static_descriptors": {
+    "f1": 0.9473684210526316,
+    "false_negative": 5,
+    "false_positive": 10,
+    "false_positive_rate": 0.16666666666666666,
+    "precision": 0.9310344827586207,
+    "recall": 0.9642857142857143,
+    "true_negative": 50,
+    "true_positive": 135
+  },
+  "static_duration_ms": 27
+}

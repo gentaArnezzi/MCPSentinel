@@ -1,4 +1,5 @@
-from mcpsentinel.safety import sanitize_text, sanitize_url
+from mcpsentinel.models import TargetConfig
+from mcpsentinel.safety import has_sensitive_auth_context, sanitize_text, sanitize_url
 
 
 def test_uri_sanitizer_redacts_generic_query_path_and_encoded_secret_values() -> None:
@@ -27,3 +28,12 @@ def test_text_sanitizer_strips_credentials_from_non_http_resource_uris() -> None
     assert "alice" not in redacted
     assert "database-password" not in redacted
     assert "postgresql://db.internal/customer-data" in redacted
+
+
+def test_auth_context_detection_checks_http_identity_when_url_is_absent() -> None:
+    target = TargetConfig(
+        transport="http",
+        identity="https://example.com/mcp?access_token=secret",
+    )
+
+    assert has_sensitive_auth_context(target)

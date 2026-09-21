@@ -59,9 +59,7 @@ def sanitize_url(value: str) -> str:
         hostname = parsed.hostname
         if not hostname:
             return value
-        host = (
-            f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
-        )
+        host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
         try:
             port = parsed.port
         except ValueError:
@@ -115,6 +113,43 @@ def safe_target_identity(target: TargetConfig) -> str:
         arguments = _safe_command_arguments(target.arguments)
         return " ".join([sanitize_text(target.command), *arguments])
     return sanitize_text(target.identity)
+
+
+def has_sensitive_auth_context(target: TargetConfig) -> bool:
+    """Return whether a target may expose a credential-scoped MCP catalog.
+
+    This deliberately errs toward requiring a fresh approval. Legacy baselines
+    cannot prove which authentication scope produced their descriptor catalog.
+    """
+    if target.environment or target.inherit_environment:
+        return True
+    url_value = target.url or (target.identity if target.transport == "http" else None)
+    if url_value:
+        try:
+            parsed = urlsplit(url_value)
+        except ValueError:
+            return True
+        if parsed.username is not None or parsed.password is not None:
+            return True
+        for part in parsed.query.split("&"):
+            key, _, value = part.partition("=")
+            if _SENSITIVE_FIELD.search(unquote_plus(key)):
+                return True
+            if _redact_token_shapes(unquote_plus(value)) != unquote_plus(value):
+                return True
+    redact_next = False
+    for argument in target.arguments:
+        if redact_next:
+            return True
+        key, separator, value = argument.partition("=")
+        if _SENSITIVE_FIELD.search(key.lstrip("-")):
+            return True
+        if separator and _redact_token_shapes(value) != value:
+            return True
+        if _redact_token_shapes(argument) != argument:
+            return True
+        redact_next = bool(_SENSITIVE_FIELD.search(argument.lstrip("-")))
+    return False
 
 
 def safe_target_payload(target: TargetConfig) -> dict[str, Any]:

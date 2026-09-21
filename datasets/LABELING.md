@@ -25,6 +25,12 @@ not a held-out evaluation: any pattern updated from it must also be checked
 against v1 and the v2 public negative control. The independent-review protocol
 lives in `authorized_positive_metadata_v3/INDEPENDENT_REVIEW.md`.
 
+`server_instructions_v4` is a curated metadata-only regression control for the
+dedicated `MCP-S001` path. Its `segment` labels make English, non-English,
+obfuscated, and ambiguous results visible separately. It has maintainer labels,
+not independent real-world labels, and must not be used to claim ecosystem-wide
+accuracy.
+
 The benchmark prints these counts. A case matrix must declare `expected_count`;
 the runner rejects it when the dimensions expand to a different number of
 cases. This makes it possible to audit exactly what produced a metric from a

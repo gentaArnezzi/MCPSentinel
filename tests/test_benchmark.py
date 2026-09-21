@@ -7,11 +7,20 @@ import pytest
 
 from mcpsentinel.benchmark import (
     BenchmarkConfigurationError,
+    _descriptor_metrics,
     benchmark_json,
     benchmark_text,
     run_benchmark,
 )
 from mcpsentinel.semantic import HeuristicJudge
+
+
+def test_descriptor_metrics_do_not_multiply_true_negatives_by_rule_count() -> None:
+    expected = {"positive": {"MCP001"}, "benign": set(), "miss": {"MCP002"}, "clean": set()}
+    metrics = _descriptor_metrics({("positive", "MCP001"), ("benign", "MCP004")}, expected)
+    assert metrics.true_positive == metrics.false_positive == 1
+    assert metrics.true_negative == metrics.false_negative == 1
+    assert metrics.false_positive_rate == 0.5
 
 
 async def test_controlled_dataset_measures_semantic_precision_improvement() -> None:
@@ -35,6 +44,8 @@ async def test_controlled_dataset_measures_semantic_precision_improvement() -> N
     assert report.scanner_version
     assert report.static_duration_ms >= 0
     assert report.semantic_duration_ms >= 0
+    assert report.semantic_assessment_count >= report.static_candidate_count
+    assert report.estimated_api_cost_usd == 0.0
     payload = json.loads(benchmark_json(report))
     assert payload["semantic"]["precision"] == 1.0
     assert payload["static"]["false_positive_rate"] > 0
@@ -42,6 +53,7 @@ async def test_controlled_dataset_measures_semantic_precision_improvement() -> N
     assert "Per category:" in benchmark_text(report)
     assert "Provenance:" in benchmark_text(report)
     assert "Dataset SHA-256:" in benchmark_text(report)
+    assert "estimated_api_cost=$0.000000" in benchmark_text(report)
 
 
 async def test_case_matrix_count_is_validated(tmp_path: Path) -> None:
@@ -69,10 +81,7 @@ async def test_case_matrix_count_is_validated(tmp_path: Path) -> None:
 
 async def test_public_metadata_negative_control_reports_only_false_positive_rate() -> None:
     dataset = (
-        Path(__file__).parents[1]
-        / "datasets"
-        / "curated_public_metadata_v2"
-        / "manifest.json"
+        Path(__file__).parents[1] / "datasets" / "curated_public_metadata_v2" / "manifest.json"
     )
 
     report = await run_benchmark(dataset, HeuristicJudge(), semantic_threshold=0.70)
@@ -99,10 +108,7 @@ async def test_public_metadata_negative_control_reports_only_false_positive_rate
 
 async def test_authorized_positive_control_is_source_attributed_and_detected() -> None:
     dataset = (
-        Path(__file__).parents[1]
-        / "datasets"
-        / "authorized_positive_metadata_v3"
-        / "manifest.json"
+        Path(__file__).parents[1] / "datasets" / "authorized_positive_metadata_v3" / "manifest.json"
     )
 
     report = await run_benchmark(dataset, HeuristicJudge(), semantic_threshold=0.70)
@@ -117,3 +123,21 @@ async def test_authorized_positive_control_is_source_attributed_and_detected() -
     assert report.semantic.true_positive == 18
     assert report.semantic.false_positive == 0
     assert "scope: authorized-metadata-positive-control" in benchmark_text(report)
+
+
+async def test_server_instruction_corpus_reports_dedicated_language_segments() -> None:
+    dataset = Path(__file__).parents[1] / "datasets" / "server_instructions_v4" / "manifest.json"
+
+    report = await run_benchmark(dataset, HeuristicJudge(), semantic_threshold=0.70)
+
+    assert report.case_count == 28
+    assert report.semantic_assessment_count == 37
+    assert report.semantic.precision == 1.0
+    assert report.semantic.recall == 1.0
+    assert report.server_instruction_segments["english"].precision == 1.0
+    assert report.server_instruction_segments["english"].recall == 1.0
+    assert report.server_instruction_segments["non_english"].precision == 1.0
+    assert report.server_instruction_segments["non_english"].recall == 1.0
+    payload = json.loads(benchmark_json(report))
+    assert payload["server_instruction_segments"]["obfuscated"]["f1"] == 1.0
+    assert "Server instruction segments:" in benchmark_text(report)

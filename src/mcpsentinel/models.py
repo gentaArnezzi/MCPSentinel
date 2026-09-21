@@ -38,6 +38,7 @@ class Category(StrEnum):
     OAUTH_CONFUSED_DEPUTY = "oauth_confused_deputy"
     RUG_PULL = "rug_pull"
     RESOURCE_EXHAUSTION = "resource_exhaustion"
+    PROTOCOL_INTEGRITY = "protocol_integrity"
 
 
 class DescriptorKind(StrEnum):
@@ -46,6 +47,7 @@ class DescriptorKind(StrEnum):
     RESOURCE = "resource"
     RESOURCE_TEMPLATE = "resource_template"
     SERVER_INSTRUCTIONS = "server_instructions"
+    SERVER_IDENTITY = "server_identity"
 
 
 class DynamicStatus(StrEnum):

@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import secrets
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,7 +23,7 @@ from .models import (
     ToolDescriptor,
     to_primitive,
 )
-from .safety import safe_target_identity
+from .safety import has_sensitive_auth_context, safe_target_identity, sanitize_text
 
 
 def stable_hash(value: Any) -> str:
@@ -30,7 +31,43 @@ def stable_hash(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def definition_fingerprint(target: TargetConfig, descriptors: list[ToolDescriptor]) -> str:
+def stable_server_identity(discovery_metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Extract only stable, bounded protocol identity fields from discovery metadata."""
+    metadata = discovery_metadata or {}
+    server = metadata.get("server") if isinstance(metadata.get("server"), dict) else {}
+    capabilities = metadata.get("capabilities", [])
+    if not isinstance(capabilities, (list, tuple, set)):
+        capabilities = []
+
+    def stable_text(value: Any) -> str:
+        raw = str(value or "")
+        safe = sanitize_text(raw)
+        if safe != raw or len(safe) > 512:
+            return safe[:400] + " [sha256:" + stable_hash(raw) + "]"
+        return safe
+
+    return {
+        "name": stable_text(server.get("name")),
+        "version": stable_text(server.get("version")),
+        "protocol_version": stable_text(metadata.get("protocol_version")),
+        "capabilities": sorted(
+            {stable_text(value) for value in capabilities if stable_text(value)}
+        ),
+    }
+
+
+def duplicate_descriptor_keys(descriptors: list[ToolDescriptor]) -> tuple[str, ...]:
+    counts: dict[str, int] = {}
+    for descriptor in descriptors:
+        counts[descriptor.key] = counts.get(descriptor.key, 0) + 1
+    return tuple(sorted(key for key, count in counts.items() if count > 1))
+
+
+def definition_fingerprint(
+    target: TargetConfig,
+    descriptors: list[ToolDescriptor],
+    discovery_metadata: dict[str, Any] | None = None,
+) -> str:
     """Return a stable identity for exactly the MCP definition that was reviewed.
 
     The endpoint identity is credential-safe and descriptors are ordered by their
@@ -39,7 +76,7 @@ def definition_fingerprint(target: TargetConfig, descriptors: list[ToolDescripto
     """
     return stable_hash(
         {
-            "format": "mcpsentinel-definition-v1",
+            "format": "mcpsentinel-definition-v2",
             "target": {
                 "transport": target.transport,
                 "identity": safe_target_identity(target),
@@ -48,6 +85,7 @@ def definition_fingerprint(target: TargetConfig, descriptors: list[ToolDescripto
                 {"key": descriptor.key, "sha256": stable_hash(descriptor)}
                 for descriptor in sorted(descriptors, key=lambda item: item.key)
             ],
+            "server_identity": stable_server_identity(discovery_metadata),
         }
     )
 
@@ -56,6 +94,14 @@ def definition_fingerprint(target: TargetConfig, descriptors: list[ToolDescripto
 class BaselineComparison:
     findings: list[Finding]
     prior_exists: bool
+    reapproval_required: bool = False
+    notice: str | None = None
+
+
+@dataclass(frozen=True)
+class _LoadedSnapshot:
+    payload: dict[str, Any] | None
+    source: str
 
 
 class BaselineStore:
@@ -91,18 +137,27 @@ class BaselineStore:
         except FileNotFoundError:
             self.root.mkdir(parents=True, exist_ok=True)
             generated = secrets.token_bytes(32)
+            descriptor, temporary_name = tempfile.mkstemp(
+                dir=self.root,
+                prefix=".baseline-scope-key.",
+                suffix=".tmp",
+            )
+            temporary = Path(temporary_name)
             try:
-                descriptor = os.open(
-                    self.scope_key_path,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                    0o600,
-                )
-            except FileExistsError:
-                key = self.scope_key_path.read_bytes()
-            else:
                 with os.fdopen(descriptor, "wb") as key_file:
+                    if os.name == "posix":
+                        os.fchmod(key_file.fileno(), 0o600)
                     key_file.write(generated)
-                key = generated
+                    key_file.flush()
+                    os.fsync(key_file.fileno())
+                try:
+                    os.link(temporary, self.scope_key_path)
+                except FileExistsError:
+                    key = self.scope_key_path.read_bytes()
+                else:
+                    key = generated
+            finally:
+                temporary.unlink(missing_ok=True)
         except OSError as error:
             message = f"Could not read baseline scope key {self.scope_key_path}: {error}"
             raise RuntimeError(message) from error
@@ -125,31 +180,55 @@ class BaselineStore:
     def _snapshot_path(self, target: TargetConfig) -> Path:
         return self.snapshot_dir / f"{self._target_key(target)}.json"
 
-    def load_snapshot(self, target: TargetConfig) -> dict[str, Any] | None:
+    def _load_snapshot(self, target: TargetConfig) -> _LoadedSnapshot:
         path = self._snapshot_path(target)
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            return _LoadedSnapshot(json.loads(path.read_text(encoding="utf-8")), "current")
         except FileNotFoundError:
-            for key in (self._v086_target_key(target), self._legacy_target_key(target)):
+            for source, key in (
+                ("v0.8.6", self._v086_target_key(target)),
+                ("legacy", self._legacy_target_key(target)),
+            ):
                 legacy_path = self.snapshot_dir / f"{key}.json"
                 if legacy_path == path:
                     continue
                 try:
-                    return json.loads(legacy_path.read_text(encoding="utf-8"))
+                    payload = json.loads(legacy_path.read_text(encoding="utf-8"))
                 except FileNotFoundError:
                     continue
                 except (OSError, json.JSONDecodeError) as error:
                     message = f"Could not read baseline snapshot {legacy_path}: {error}"
                     raise RuntimeError(message) from error
-            return None
+                if has_sensitive_auth_context(target):
+                    return _LoadedSnapshot(None, "blocked-auth-legacy")
+                return _LoadedSnapshot(payload, source)
+            return _LoadedSnapshot(None, "missing")
         except (OSError, json.JSONDecodeError) as error:
             raise RuntimeError(f"Could not read baseline snapshot {path}: {error}") from error
 
+    def load_snapshot(self, target: TargetConfig) -> dict[str, Any] | None:
+        return self._load_snapshot(target).payload
+
     def compare(
-        self, target: TargetConfig, descriptors: list[ToolDescriptor]
+        self,
+        target: TargetConfig,
+        descriptors: list[ToolDescriptor],
+        discovery_metadata: dict[str, Any] | None = None,
     ) -> BaselineComparison:
-        previous = self.load_snapshot(target)
+        loaded = self._load_snapshot(target)
+        previous = loaded.payload
         if previous is None:
+            if loaded.source == "blocked-auth-legacy":
+                return BaselineComparison(
+                    findings=[],
+                    prior_exists=False,
+                    reapproval_required=True,
+                    notice=(
+                        "A legacy baseline exists, but MCPSentinel cannot safely associate it "
+                        "with the current authentication context. Re-scan and approve a new "
+                        "baseline."
+                    ),
+                )
             return BaselineComparison(findings=[], prior_exists=False)
 
         current = {item.key: stable_hash(item) for item in descriptors}
@@ -157,6 +236,29 @@ class BaselineStore:
         old = previous.get("descriptor_hashes", {})
         old_field_hashes = previous.get("descriptor_field_hashes", {})
         findings: list[Finding] = []
+
+        version = previous.get("version")
+        reapproval_required = version != 5
+        notice = None
+        if reapproval_required:
+            notice = (
+                "This baseline predates identity-aware snapshot format v5. Descriptor changes "
+                "were compared conservatively, but a fresh approval is required before the "
+                "current server identity is trusted."
+            )
+        elif discovery_metadata is not None:
+            old_identity = previous.get("server_identity", {})
+            current_identity = stable_server_identity(discovery_metadata)
+            if old_identity != current_identity:
+                findings.append(_server_identity_finding(old_identity, current_identity))
+
+        if duplicate_descriptor_keys(descriptors):
+            return BaselineComparison(
+                findings=findings,
+                prior_exists=True,
+                reapproval_required=True,
+                notice="Duplicate descriptor identities prevent an exact baseline comparison.",
+            )
 
         for key in sorted(current.keys() - old.keys()):
             kind, name = key.split(":", maxsplit=1)
@@ -182,16 +284,37 @@ class BaselineStore:
                         changed_fields=changed_fields,
                     )
                 )
-        return BaselineComparison(findings=findings, prior_exists=True)
+        return BaselineComparison(
+            findings=findings,
+            prior_exists=True,
+            reapproval_required=reapproval_required,
+            notice=notice,
+        )
 
-    def save_snapshot(self, target: TargetConfig, descriptors: list[ToolDescriptor]) -> None:
+    def save_snapshot(
+        self,
+        target: TargetConfig,
+        descriptors: list[ToolDescriptor],
+        discovery_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        duplicates = duplicate_descriptor_keys(descriptors)
+        if duplicates:
+            raise ValueError(
+                "Cannot save an ambiguous baseline with duplicate descriptor identities: "
+                + ", ".join(duplicates)
+            )
         descriptor_hashes = {item.key: stable_hash(item) for item in descriptors}
         descriptor_field_hashes = {item.key: _field_hashes(item) for item in descriptors}
+        server_identity = stable_server_identity(discovery_metadata)
         payload = {
-            "version": 4,
+            "version": 5,
             "target": {"transport": target.transport, "identity": safe_target_identity(target)},
             "captured_at": datetime.now(UTC).isoformat(),
-            "definition_fingerprint": definition_fingerprint(target, descriptors),
+            "definition_fingerprint": definition_fingerprint(
+                target, descriptors, discovery_metadata
+            ),
+            "server_identity": server_identity,
+            "server_identity_fingerprint": stable_hash(server_identity),
             "descriptor_hashes": descriptor_hashes,
             "descriptor_field_hashes": descriptor_field_hashes,
         }
@@ -222,9 +345,25 @@ class BaselineStore:
     @staticmethod
     def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        temporary.replace(path)
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                if os.name == "posix":
+                    os.fchmod(output.fileno(), 0o600)
+                json.dump(payload, output, indent=2, sort_keys=True)
+                output.write("\n")
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, path)
+            if os.name == "posix":
+                os.chmod(path, 0o600)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def _field_hashes(descriptor: ToolDescriptor) -> dict[str, str]:
@@ -270,5 +409,30 @@ def _baseline_finding(
         rationale=(
             "A metadata change can be legitimate, but it requires review "
             "before the server remains trusted."
+        ),
+    )
+
+
+def _server_identity_finding(previous: dict[str, Any], current: dict[str, Any]) -> Finding:
+    fields = ("name", "version", "protocol_version", "capabilities")
+    changes = tuple(
+        f"{field}: {previous.get(field, '')!r} -> {current.get(field, '')!r}"
+        for field in fields
+        if previous.get(field) != current.get(field)
+    )
+    return Finding(
+        rule_id="MCP-B002",
+        title="MCP server identity changed since trusted baseline",
+        category=Category.PROTOCOL_INTEGRITY,
+        severity=Severity.MEDIUM,
+        message="The server identity or negotiated protocol changed since baseline approval.",
+        subject_kind=DescriptorKind.SERVER_IDENTITY,
+        subject_name=str(current.get("name") or previous.get("name") or "server_identity"),
+        evidence=changes,
+        confidence=0.95,
+        layers=("baseline",),
+        rationale=(
+            "Version and protocol changes can be legitimate, but the stable server identity is "
+            "part of the reviewed trust boundary and requires explicit review."
         ),
     )

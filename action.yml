@@ -66,9 +66,9 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.baseline-dir }}
-        key: mcpsentinel-${{ runner.os }}-${{ github.repository }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+        key: mcpsentinel-${{ runner.os }}-${{ github.repository }}-${{ github.base_ref || github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          mcpsentinel-${{ runner.os }}-${{ github.repository }}-${{ github.ref_name }}-
+          mcpsentinel-${{ runner.os }}-${{ github.repository }}-${{ github.base_ref || github.ref_name }}-
     - id: scan
       shell: bash
       env:
@@ -84,6 +84,12 @@ runs:
         INPUT_POLICY: ${{ inputs.policy }}
         INPUT_JUDGE: ${{ inputs.judge }}
       run: |
+        if [[ "$GITHUB_EVENT_NAME" == "pull_request" || "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
+          if [[ -n "$INPUT_APPROVE_BASELINE_FINGERPRINT" ]]; then
+            echo "::error::Baseline approval is unavailable in pull request workflows. Approve from a trusted push or manual workflow."
+            exit 2
+          fi
+        fi
         if [[ "$INPUT_APPROVE_BASELINE" == "true" ]]; then
           echo "::error::approve-baseline is deprecated. Review a prior scan, then use approve-baseline-fingerprint in a separate trusted workflow."
           exit 2
@@ -134,7 +140,9 @@ runs:
         fi
         exit "$scan_status"
     - name: Save updated MCPSentinel baseline cache
-      if: ${{ success() }}
+      # Pull requests inherit their target branch's reviewed baseline but can
+      # never publish a replacement trust snapshot into that branch's scope.
+      if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.baseline-dir }}
