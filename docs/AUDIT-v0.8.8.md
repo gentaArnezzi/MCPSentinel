@@ -96,9 +96,13 @@ every historical version permitted by dependency ranges.
 - The locked HTTP stack was upgraded to httpx2/httpcore2 2.13.0 after the prior
   dependency audit flagged httpx2 2.10.0. `pip-audit` reports no known vulnerabilities
   for the current lock. That is a database check, not proof of no vulnerabilities.
-- Added a CodeQL workflow; it is not yet a completed CodeQL assessment. Remote `main`
-  was unprotected at audit time. Branch protection is an owner configuration task,
-  not a property a committed YAML file can claim to have enabled.
+- Added a CodeQL workflow; its hosted result must be checked separately. Remote
+  `main` was initially unprotected. With the owner's approval, branch protection
+  was then enabled: PR required, zero extra approving reviewers, strict required
+  checks (`test`, `docker-sandbox-test`, `container-smoke-test`, `action-smoke-test`,
+  and `Analyze Python`) bound to the GitHub Actions app, administrator enforcement,
+  and no force pushes or deletion. This was verified through the GitHub API; it is
+  not a property inferred from committing a YAML file.
   Permissions were checked through Context7's GitHub Actions reference, with
   Python's no-build configuration checked against the
   [pinned CodeQL Action documentation](https://github.com/github/codeql-action/blob/ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd/README.md).
