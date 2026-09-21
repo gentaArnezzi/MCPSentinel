@@ -3,7 +3,9 @@
 Scope: local v0.8.8 release candidate based on repository commit
 `1e3e572403ac9d6875783744c729404245330d76` (v0.8.7). This is an engineering
 self-assessment, not an independent security audit or a production certification.
-The changes described here have not yet been published or reassessed by M8ven.
+M8ven's assessed revision must be checked independently. Publication status is
+tracked by the [release workflow](https://github.com/gentaArnezzi/MCPSentinel/actions/workflows/publish.yml)
+and [releases](https://github.com/gentaArnezzi/MCPSentinel/releases), not inferred from this audit.
 
 ## Verdict
 
@@ -76,7 +78,9 @@ comparisons and accuracy superiority claims remain unverified hypotheses.
 | Distribution container build and non-root/read-only smoke tests | Passed; version 0.8.8; onboarding also runs with networking disabled |
 | Locked dependency audit and installed dependency compatibility | No known vulnerabilities / no conflicts |
 | Four offline benchmark runs | Completed; JSON evidence linked below |
-| Hosted CI / CodeQL / registry publication | Pending; not inferred from local test success |
+| Hosted CI | [PR candidate run passed](https://github.com/gentaArnezzi/MCPSentinel/actions/runs/35602606329): tests, real Docker sandbox, distribution image, Action smoke |
+| CodeQL | [Analysis passed](https://github.com/gentaArnezzi/MCPSentinel/actions/runs/35602606218); zero results across 50 rules; final release revision still requires its own passing checks |
+| Registry publication | Separate release-workflow gate; not inferred from test success |
 
 Fresh-wheel testing resolved allowed current dependency versions independently
 of the development lock (including MCP 2.2.0); it does not establish support for
@@ -100,7 +104,8 @@ every historical version permitted by dependency ranges.
   `main` was initially unprotected. With the owner's approval, branch protection
   was then enabled: PR required, zero extra approving reviewers, strict required
   checks (`test`, `docker-sandbox-test`, `container-smoke-test`, `action-smoke-test`,
-  and `Analyze Python`) bound to the GitHub Actions app, administrator enforcement,
+  and `Analyze Python`) bound to the GitHub Actions app, plus the `CodeQL` result
+  check bound to GitHub's code-scanning app, administrator enforcement,
   and no force pushes or deletion. This was verified through the GitHub API; it is
   not a property inferred from committing a YAML file.
   Permissions were checked through Context7's GitHub Actions reference, with

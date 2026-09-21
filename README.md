@@ -30,8 +30,8 @@ The default judge is an offline, deterministic heuristic—not an LLM. Optional
 OpenAI review transmits bounded, redacted metadata to OpenAI. Neither mode proves
 that a server's implementation is safe.
 
-**Checkout status: v0.8.8 release candidate, not yet published.** This README
-describes the checkout; install from source to try unreleased features. The M8ven
+**Version scope: v0.8.8.** The PyPI badge above shows the published version;
+install from source if your installed release predates the features here. The M8ven
 badge concerns the source revision linked on its listing, not this working tree,
 package provenance, or measured detection accuracy. Read the
 [dated engineering assessment](docs/AUDIT-v0.8.8.md) for evidence and remaining gates.

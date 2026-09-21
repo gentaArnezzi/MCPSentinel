@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.8 — Security hardening (unreleased)
+## 0.8.8 — Security hardening (2026-09-21)
 
 - Scope GitHub Action baseline caches to a pull request's base branch and make pull requests restore-only.
 - Independently review every MCP server instruction through `MCP-S001`, with precision-first offline multilingual coverage and policy/cache integration.
