@@ -87,10 +87,12 @@ jobs:
       - run: test -n '${{ steps.enforcement.outputs.definition-fingerprint }}'
       - uses: ./
         id: approval
+        if: github.event_name == 'push'
         with:
           target: python tests/fixture_stdio_server.py
           transport: stdio
           allow-stdio-execution: "true"
           baseline-dir: .mcpsentinel-action-test
           approve-baseline-fingerprint: 'sha256:${{ steps.scan.outputs.definition-fingerprint }}'
-      - run: test -n "$(find .mcpsentinel-action-test/baselines -type f -print -quit)"
+      - if: github.event_name == 'push'
+        run: test -n "$(find .mcpsentinel-action-test/baselines -type f -print -quit)"

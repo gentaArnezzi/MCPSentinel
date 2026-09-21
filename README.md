@@ -20,10 +20,21 @@
 [![License](https://img.shields.io/github/license/gentaArnezzi/MCPSentinel)](LICENSE)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-6A5ACD)](https://registry.modelcontextprotocol.io/)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-ready-2088FF?logo=githubactions)](https://github.com/gentaArnezzi/MCPSentinel)
+[![M8ven verification](https://m8ven.ai/badge/mcp/gentaarnezzi/mcpsentinel?variant=verified)](https://m8ven.ai/mcp/gentaarnezzi/mcpsentinel)
 
 </div>
 
 MCPSentinel is a precision-first security scanner for [Model Context Protocol](https://modelcontextprotocol.io/) servers. It treats a static rule hit as a candidate, then applies semantic intent analysis before reporting it. This keeps the fast coverage of pattern matching without making every normal-looking `fetch` or `delete` tool a noisy vulnerability.
+
+The default judge is an offline, deterministic heuristic—not an LLM. Optional
+OpenAI review transmits bounded, redacted metadata to OpenAI. Neither mode proves
+that a server's implementation is safe.
+
+**Version scope: v0.8.8.** The PyPI badge above shows the published version;
+install from source if your installed release predates the features here. The M8ven
+badge concerns the source revision linked on its listing, not this working tree,
+package provenance, or measured detection accuracy. Read the
+[dated engineering assessment](docs/AUDIT-v0.8.8.md) for evidence and remaining gates.
 
 ## Start in 60 seconds
 
@@ -41,6 +52,7 @@ for automation.
 
 | I want to… | Start here |
 | --- | --- |
+| try it without a server or API key | [Local demo: clean, suspicious, duplicate](docs/TRY_IT.md) |
 | inspect one local or remote server | [Scan a server](#scan-a-server) |
 | add a review gate to CI | [GitHub Action](#github-action) |
 | expose scanning to an AI client | [MCP-native scanner](#mcp-native-scanner) |
@@ -50,18 +62,19 @@ for automation.
 ### The review loop
 
 ```text
-discover metadata  ->  static candidates  ->  semantic triage  ->  human review
-                                                                        |
-                                                                        v
-                                                        explicitly approve baseline
+discover metadata  ->  static candidates --------> semantic triage  -> human review
+         |                                               ^                    |
+         +-> every server instruction (MCP-S001) --------+                    v
+                                                     explicitly approve baseline
 ```
 
 ## What you get
 
 - MCP v2 discovery over stdio and Streamable HTTP, negotiating `server/discover` first and falling back automatically to legacy `initialize`
 - configurable static pattern rules for tool, prompt, resource, resource-template, and server-instruction descriptors, including tool poisoning, shadowing, cross-server, and OAuth confused-deputy signals
-- semantic triage: offline heuristic by default, optional OpenAI structured-output judge with bounded fallback
-- explicit baseline approval and field-aware rug-pull definition diffs
+- semantic triage: offline heuristic by default, optional OpenAI structured-output judge with bounded fallback; every server-level instruction receives a dedicated `MCP-S001` review even without a regex hit
+- explicit baseline approval, field-aware descriptor diffs, and stable server identity/protocol drift detection
+- protocol-integrity checks that reject duplicate descriptor identities before a baseline can become trusted
 - branded Rich terminal, JSON, SARIF, and self-contained HTML risk reports
 - allow/deny policy configuration
 - explicit, Docker-sandboxed owned-tool validation with no network egress
@@ -164,11 +177,15 @@ mcpsentinel scan http://localhost:8000/mcp --judge openai --judge-model gpt-4o-m
 mcpsentinel scan http://localhost:8000/mcp --baseline-dir .mcpsentinel
 
 # After reviewing the scan's displayed fingerprint, rediscover and approve only that exact state
-mcpsentinel baseline approve http://localhost:8000/mcp --baseline-dir .mcpsentinel \\
-  --fingerprint sha256:<reviewed-fingerprint>
+mcpsentinel baseline approve http://localhost:8000/mcp --baseline-dir .mcpsentinel \
+  --fingerprint sha256:REPLACE_WITH_REVIEWED_FINGERPRINT
 ```
 
-`--baseline-dir` is a root directory: by default it is `~/.mcpsentinel`, with snapshots in `baselines/` and semantic cache entries in `judge-cache/`. It also contains a local, mode-`0600` HMAC scope key. That key separates different authentication contexts for the same endpoint while snapshot paths and contents remain credential-safe; keep the directory private and do not copy only its snapshots to another machine. An ordinary scan **never updates** a baseline. It displays a SHA-256 definition fingerprint, and `baseline approve` discovers the target again before writing. Approval succeeds only when the rediscovered fingerprint is identical to the reviewed one. A changed, added, or removed descriptor—including server instructions—is surfaced as an `MCP-B001` rug-pull review finding while the prior approved snapshot is preserved. For changes, the report identifies whether the description, input schema, and/or metadata changed without storing a raw historical descriptor.
+`--baseline-dir` is a root directory: by default it is `~/.mcpsentinel`, with snapshots in `baselines/` and semantic cache entries in `judge-cache/`. It also contains a local, mode-`0600` HMAC scope key. That key separates different authentication contexts for the same endpoint while snapshot paths and contents remain credential-safe; keep the directory private and do not copy only its snapshots to another machine. Snapshots and cache entries are written atomically with unique temporary files, an `fsync`, and mode `0600` on POSIX systems.
+
+An ordinary scan **never updates** a baseline. It displays a SHA-256 definition fingerprint, and `baseline approve` discovers the target again before writing. Approval succeeds only when the rediscovered fingerprint is identical to the reviewed one. Definition fingerprint v2 and baseline snapshot v5 cover both descriptor state and a stable identity subset: server name, server version, negotiated protocol version, and advertised capability names. A changed, added, or removed descriptor—including server instructions—is surfaced as `MCP-B001`; an identity/protocol change is surfaced separately as medium-severity `MCP-B002`. The prior approved snapshot is preserved until an explicit approval.
+
+Two descriptors with the same `kind:name` identity produce `MCP-N002`, because a dictionary-shaped baseline cannot represent that catalog unambiguously. Approval is refused until the server returns unique identities. Older baselines require a one-time v5 reapproval. Credential-free legacy snapshots may still be compared conservatively, but a legacy snapshot is never trusted or migrated automatically when the target has URL user-info, a sensitive query key, explicit environment values, credential-looking arguments, or inherited host environment access.
 
 The first scan reports that no approved baseline exists. That is an onboarding state, not a vulnerability finding. Establish a baseline only from a server version and environment you trust.
 
@@ -183,6 +200,12 @@ Each OpenAI judgement uses a 30-second client deadline and at most two SDK retri
 If `--judge auto` encounters an OpenAI outage or malformed response, the scan completes with the offline heuristic and emits a visible report note; a fallback verdict is not cached as an OpenAI verdict. `--judge openai` remains strict and fails rather than silently changing the configured provider.
 
 The semantic threshold defaults to `0.70`. Candidate findings below it are withheld from the report; lower it only when you prefer recall over precision.
+
+### Server-level instruction analysis
+
+MCP server instructions are an independent attack surface, so MCPSentinel does not wait for an English static regex to match them. Every `SERVER_INSTRUCTIONS` descriptor creates a dedicated `MCP-S001` semantic review. The offline heuristic has a precision-first path that marks ordinary usage guidance safe while recognizing instruction-hierarchy overrides, concealment, credential exfiltration, suspicious external transfer, and selected English, Spanish, Indonesian, Portuguese, French, and German forms. An allow or deny selector for `MCP-S001` works like any other policy decision, and the semantic threshold still applies.
+
+The heuristic runs locally and transmits nothing. Choosing `--judge openai` sends a bounded, recursively redacted metadata excerpt to the configured OpenAI model; review that privacy boundary before enabling it for internal server instructions.
 
 ## Custom static rules
 
@@ -200,7 +223,7 @@ Pass `--rules path/to/rules.json` to add rule objects to the built-in rules. Eac
 }
 ```
 
-Supported categories are `prompt_injection`, `tool_poisoning`, `tool_shadowing`, `ssrf`, `secret_exfiltration`, `command_execution`, `destructive_operation`, `cross_server_attack`, `oauth_confused_deputy`, and `rug_pull`.
+Supported categories are `prompt_injection`, `tool_poisoning`, `tool_shadowing`, `ssrf`, `secret_exfiltration`, `command_execution`, `destructive_operation`, `cross_server_attack`, `oauth_confused_deputy`, `rug_pull`, `resource_exhaustion`, and `protocol_integrity`.
 
 Before regex evaluation, the scanner applies Unicode NFKC normalization, removes format controls such as zero-width characters, and collapses whitespace in an analysis-only view. It intentionally does not rewrite cross-script homoglyphs because that would risk misrepresenting legitimate metadata; use the benchmark to track those coverage gaps before claiming support for them. Descriptor fields also have byte budgets (4 KiB name, 64 KiB description, 192 KiB each for schema and metadata, 512 KiB total). An over-limit descriptor produces `MCP-N001` with the original byte count and SHA-256, while only bounded data reaches reports, rules, baselines, or an optional semantic judge.
 
@@ -208,7 +231,7 @@ Treat custom rules as **trusted security configuration**: Python regex can consu
 
 ## Policy configuration
 
-`--policy path/to/policy.json` supplies organization-specific allow/deny controls. An allow selector suppresses matching static candidates; a deny selector emits a policy-enforced finding without relying on the semantic judge. Selectors can be rule IDs or objects scoped to a tool-name regex.
+`--policy path/to/policy.json` supplies organization-specific allow/deny controls. An allow selector suppresses matching static or dedicated server-instruction candidates; a deny selector emits a policy-enforced finding without relying on the semantic judge. Selectors can be rule IDs or objects scoped to a descriptor-name regex.
 
 ```json
 {
@@ -251,7 +274,7 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
 - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
   with:
     python-version: "3.12"
-- uses: gentaArnezzi/MCPSentinel@v0.8.7
+- uses: gentaArnezzi/MCPSentinel@v0.8.8
   id: mcpsentinel
   with:
     target: https://mcp.example.com/mcp
@@ -264,12 +287,12 @@ The repository root is a composite GitHub Action. It installs MCPSentinel, resto
     sarif_file: ${{ steps.mcpsentinel.outputs.sarif }}
 ```
 
-The Action restores the newest branch-scoped baseline cache and saves a fresh immutable cache after each successful run, so reviewed baselines and semantic cache entries persist instead of becoming stuck at their first value. The cache is workflow convenience state, not a replacement for protected branches or review. A normal `fail-on` result still writes the SARIF report and `definition-fingerprint` output before returning status `1`; the `if: always()` upload step is therefore required to retain evidence when the security gate fails.
+The Action scopes its cache with `${{ github.base_ref || github.ref_name }}`. A push on `main` therefore uses the `main` trust scope, while a pull request into `main` restores that same approved baseline instead of creating a synthetic `42/merge` scope. Pull requests are restore-only and can never save a replacement trusted baseline; successful trusted push/workflow runs may save the immutable per-run cache. The cache is workflow convenience state, not a replacement for protected branches or review. A normal `fail-on` result still writes the SARIF report and `definition-fingerprint` output before returning status `1`; the `if: always()` upload step is therefore required to retain evidence when the security gate fails.
 
 To approve a baseline, first review a scan's `definition-fingerprint` output. Then pass that exact value into a separate trusted workflow on a protected branch. The Action rediscovers the server and refuses the approval if its definition has changed. Do not enable approval for pull requests from contributors.
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.8.7
+- uses: gentaArnezzi/MCPSentinel@v0.8.8
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: https://mcp.example.com/mcp
@@ -281,7 +304,7 @@ To approve a baseline, first review a scan's `definition-fingerprint` output. Th
 The Action rejects stdio targets by default because scanning them starts a process on the GitHub runner. Only enable one for source you control in a trusted, protected push workflow—never an untrusted pull request or fork:
 
 ```yaml
-- uses: gentaArnezzi/MCPSentinel@v0.8.7
+- uses: gentaArnezzi/MCPSentinel@v0.8.8
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   with:
     target: python server.py
@@ -315,8 +338,8 @@ The concrete [registry/server.json](registry/server.json) is kept version-locked
 Every non-prerelease GitHub Release publishes a versioned image and `latest` to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.7
-docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.7 scan https://mcp.example.com/mcp --transport http
+docker pull ghcr.io/gentaarnezzi/mcpsentinel:0.8.8
+docker run --rm ghcr.io/gentaarnezzi/mcpsentinel:0.8.8 scan https://mcp.example.com/mcp --transport http
 ```
 
 The first GHCR package may need its visibility set to **Public** in GitHub Packages by the repository owner. For local development, build the scanner image directly:
@@ -338,9 +361,18 @@ Run a reproducible accuracy and timing measurement with the offline judge:
 mcpsentinel benchmark datasets/vulnerable_by_design/manifest.json --format json --output benchmark.json
 ```
 
-The benchmark measures both raw static candidates and semantic findings against the dataset's expected reportable rules. It reports precision, recall, false-positive rate, F1, confusion-matrix counts, stage timings, per-category breakdowns, and the count for each provenance type. Its JSON and terminal reports include the source-manifest SHA-256 and scanner version for traceability. Ten bounded-fetch controls intentionally count as static false positives but semantic true negatives, so regressions in noise suppression are visible in CI or release review.
+The benchmark measures both raw static candidates and semantic findings against the dataset's expected reportable rules. It reports precision, recall, false-positive rate, F1, confusion-matrix counts, stage timings, semantic assessment calls, per-category breakdowns, provenance counts, and estimated API cost (`$0` for the offline heuristic; `n/a` when provider pricing is not configured). Its JSON and terminal reports include the source-manifest SHA-256 and scanner version for traceability. Ten bounded-fetch controls intentionally count as static false positives but semantic true negatives, so regressions in noise suppression are visible in CI or release review.
 
-On the bundled 200-case corpus with the offline heuristic and default threshold (`0.70`), static candidates measure precision `0.932`, recall `0.965`, F1 `0.948`, and false-positive rate `0.006` (`TP=136`, `FP=10`, `TN=1649`, `FN=5`). Semantic triage measures precision `1.000`, recall `0.965`, F1 `0.982`, and false-positive rate `0.000` (`TP=136`, `FP=0`, `TN=1659`, `FN=5`). The five deliberate misses—four non-English prompt-injection controls and one metadata-placement destructive-operation control—remain visible rather than being excluded. The SSRF category shows why both stages are reported: static precision is `0.545` while semantic precision is `1.000` on its controlled cases.
+Two denominators are reported explicitly: exact **descriptor/rule pairs**, and
+**descriptors with any finding**. Rule-pair negatives include rules that do not
+apply to a particular descriptor, so that false-positive rate is not a developer's
+chance of receiving a noisy result. On the 60 negative synthetic descriptors,
+static analysis flags 10 (`16.7%`); heuristic triage flags zero. Descriptor metrics
+are coarser: the wrong rule on a positive descriptor still counts as a detected
+descriptor. Neither metric is a count of independently tested servers. See the
+[reproducible JSON results](docs/benchmarks/v0.8.8/README.md).
+
+On the bundled 200-case corpus with the offline heuristic and default threshold (`0.70`), static candidates measure precision `0.932`, recall `0.958`, F1 `0.944`, and false-positive rate `0.005` (`TP=136`, `FP=10`, `TN=1848`, `FN=6`). Semantic triage measures precision `1.000`, recall `0.965`, F1 `0.982`, and false-positive rate `0.000` (`TP=137`, `FP=0`, `TN=1858`, `FN=5`). The dedicated server-instruction path recovers one signal that static analysis alone cannot emit. The five deliberate misses—four non-English generic prompt-injection controls and one metadata-placement destructive-operation control—remain visible rather than being excluded. The SSRF category shows why both stages are reported: static precision is `0.545` while semantic precision is `1.000` on its controlled cases.
 
 This is a reproducible regression signal—not a claim about public MCP-server accuracy, recall, real-world false-positive rate, or superiority over another scanner. The 165 generated variants are useful coverage controls, not 165 independent real-world observations.
 
@@ -348,7 +380,7 @@ This is a reproducible regression signal—not a claim about public MCP-server a
 
 [`datasets/curated_public_metadata_v2`](datasets/curated_public_metadata_v2) adds **428 literal tool descriptors** from source-pinned, permissively licensed MCP implementations: 329 from AWS Labs' Apache-2.0 repository and 99 from GitHub's MIT-licensed MCP server. Every case records repository, full commit SHA, license, source path, line, and source-file SHA-256. The extractor only reads local checkouts and never contacts or invokes an upstream MCP server.
 
-This is a **negative-control** benchmark: ordinary documented tool metadata is expected to produce no unbounded-risk finding. A tool that can perform a scoped cloud deletion or write operation is not automatically a vulnerability, so the corpus does not label source projects as insecure. At the 0.7.0 release configuration, the frozen heuristic produces zero candidates and a false-positive rate of `0.000` across 3,852 descriptor/rule negative pairs. Because it has no labelled positives, precision, recall, and F1 correctly display as `n/a`, not `1.000`.
+This is a **negative-control** benchmark: ordinary documented tool metadata is expected to produce no unbounded-risk finding. A tool that can perform a scoped cloud deletion or write operation is not automatically a vulnerability, so the corpus does not label source projects as insecure. Under the v0.8.8 ten-signal benchmark contract, the heuristic produces zero candidates and a false-positive rate of `0.000` across 4,280 descriptor/rule negative pairs. Because it has no labelled positives, precision, recall, and F1 correctly display as `n/a`, not `1.000`.
 
 ```bash
 mcpsentinel benchmark datasets/curated_public_metadata_v2/manifest.json \
@@ -367,6 +399,17 @@ mcpsentinel benchmark datasets/authorized_positive_metadata_v3/manifest.json \
 ```
 
 V3 is a **calibration regression control**, not a held-out accuracy study: its labels informed the narrow metadata rules added in 0.7.0. At that frozen configuration it reports all 18 labelled pairs while the 428-case v2 public negative control remains at zero candidates. This is useful evidence that the refinement did not create a false-positive in those exact public snapshots; it is not proof of real-world recall. One maintainer has reviewed the v3 mapping; see the [independent-review protocol](datasets/authorized_positive_metadata_v3/INDEPENDENT_REVIEW.md) before citing it beyond regression coverage.
+
+### Server instructions v4
+
+[`datasets/server_instructions_v4`](datasets/server_instructions_v4) adds 28 curated metadata-only controls for the dedicated `MCP-S001` path: five benign and five malicious English instructions, five benign and five malicious non-English instructions, four Unicode/zero-width obfuscations, and four ambiguous external-transfer cases.
+
+```bash
+mcpsentinel benchmark datasets/server_instructions_v4/manifest.json \
+  --judge heuristic --format json --output benchmark-server-instructions.json
+```
+
+At the v0.8.8 heuristic configuration, overall semantic measurement is precision `1.000`, recall `1.000`, F1 `1.000`, and false-positive rate `0.000` (`TP=27`, `FP=0`, `TN=253`, `FN=0`). Dedicated `MCP-S001` English and non-English segments each measure precision/recall/F1 `1.000` with five benign and five malicious cases. Static analysis alone recalls only `0.333` of the corpus's 27 labelled pairs, demonstrating why the independent semantic path exists. These are curated regression controls, not independent real-world prevalence or accuracy evidence.
 
 ## What MCPSentinel can—and cannot—tell you
 

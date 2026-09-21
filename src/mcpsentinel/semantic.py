@@ -12,14 +12,23 @@ from typing import Literal
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from .models import Category, JudgeVerdict, StaticCandidate, to_primitive
+from .models import (
+    Category,
+    DescriptorKind,
+    JudgeVerdict,
+    Severity,
+    StaticCandidate,
+    ToolDescriptor,
+    to_primitive,
+)
 from .normalization import normalize_for_analysis
 from .safety import sanitize_text, sanitize_value
 
 OPENAI_TIMEOUT_SECONDS = 30.0
 OPENAI_MAX_RETRIES = 2
 MAX_OPENAI_PROMPT_CHARS = 12_000
-OPENAI_PROMPT_VERSION = "v3"
+OPENAI_PROMPT_VERSION = "v4"
+SERVER_INSTRUCTION_RULE_ID = "MCP-S001"
 
 _OPENAI_INSTRUCTIONS = """You are a defensive security reviewer for Model Context Protocol servers.
 Classify whether the provided static candidate represents an actual security risk.
@@ -34,6 +43,29 @@ _MAX_PROMPT_NAME_CHARS = 200
 _MAX_PROMPT_DESCRIPTION_CHARS = 1_600
 _MAX_PROMPT_SCHEMA_CHARS = 1_000
 _MAX_PROMPT_METADATA_CHARS = 1_000
+
+
+def server_instruction_candidates(
+    descriptors: list[ToolDescriptor],
+) -> list[StaticCandidate]:
+    """Route every server instruction through an independent intent review."""
+    return [
+        StaticCandidate(
+            rule_id=SERVER_INSTRUCTION_RULE_ID,
+            title="Server instruction intent analysis",
+            category=Category.PROMPT_INJECTION,
+            severity=Severity.HIGH,
+            description=(
+                "Server-level instructions contain security-sensitive intent that requires "
+                "independent semantic review."
+            ),
+            descriptor=descriptor,
+            evidence=("Server instructions are reviewed independently of static pattern matches.",),
+        )
+        for descriptor in descriptors
+        if descriptor.kind is DescriptorKind.SERVER_INSTRUCTIONS
+    ]
+
 
 class SemanticJudgeError(RuntimeError):
     """The requested semantic provider could not supply a trustworthy verdict."""
@@ -65,7 +97,8 @@ class SemanticJudge(ABC):
 class HeuristicJudge(SemanticJudge):
     """Deterministic fallback that works without transmitting server metadata."""
 
-    identity = "heuristic-v2"
+    identity = "heuristic-v4"
+    estimated_cost_usd = 0.0
 
     async def assess(self, candidate: StaticCandidate) -> JudgeVerdict:
         text = normalize_for_analysis(
@@ -78,6 +111,12 @@ class HeuristicJudge(SemanticJudge):
                 ]
             )
         ).lower()
+        if candidate.descriptor.kind is DescriptorKind.SERVER_INSTRUCTIONS:
+            text = _instruction_analysis_text(candidate.descriptor)
+            if not text:
+                return JudgeVerdict(
+                    "safe", 0.96, "Instructions prohibit the flagged unsafe actions.", self.identity
+                )
 
         explicit_exfiltration = bool(
             re.search(
@@ -94,6 +133,18 @@ class HeuristicJudge(SemanticJudge):
             re.search(r"\b(?:allowlist|allow[- ]list)\b", text)
             and re.search(r"\b(?:block|deny|reject) private\b", text)
         )
+
+        if candidate.rule_id == SERVER_INSTRUCTION_RULE_ID or (
+            candidate.descriptor.kind is DescriptorKind.SERVER_INSTRUCTIONS
+            and candidate.rule_id in {"MCP001", "MCP002"}
+        ):
+            return _server_instruction_verdict(
+                text,
+                explicit_exfiltration=explicit_exfiltration,
+                instruction_override=instruction_override,
+                concealment=concealment,
+                judge=self.identity,
+            )
 
         if explicit_exfiltration:
             return JudgeVerdict(
@@ -160,6 +211,153 @@ class HeuristicJudge(SemanticJudge):
             ),
             judge=self.identity,
         )
+
+
+def _instruction_analysis_text(descriptor: ToolDescriptor) -> str:
+    """Ignore narrowly scoped prohibitions, never a whole mixed instruction block."""
+
+    def strings(value: object) -> list[str]:
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, dict):
+            return [text for item in value.values() for text in strings(item)]
+        if isinstance(value, (list, tuple)):
+            return [text for item in value for text in strings(item)]
+        return []
+
+    sections = [descriptor.description, *strings(descriptor.schema), *strings(descriptor.metadata)]
+    clauses = [
+        clause.strip()
+        for section in sections
+        for paragraph in section.splitlines()
+        for clause in re.split(
+            r"[.;!?]|\b(?:but|however|then)\b", normalize_for_analysis(paragraph).lower()
+        )
+    ]
+    prohibition = re.compile(
+        r"^(?:never|do not|don't)\s+(?:send|upload|post|exfiltrate|ignore)\b"
+        r"|^(?:jangan)\s+(?:kirim|unggah|abaikan)\b"
+        r"|^(?:nunca|no)\s+(?:env[ií]es|subas|ignores)\b"
+    )
+    # An extra imperative in the same clause is deliberately kept for review.
+    extra_action = re.compile(
+        r"\b(?:and|instead|also|dan|lalu|y|luego)\s+"
+        r"(?:send|upload|post|ignore|reveal|kirim|unggah|abaikan|env[ií]a|sube|ignora)\b"
+    )
+    return " ".join(
+        clause
+        for clause in clauses
+        if clause and (not prohibition.search(clause) or extra_action.search(clause))
+    )
+
+
+def _server_instruction_verdict(
+    text: str,
+    *,
+    explicit_exfiltration: bool,
+    instruction_override: bool,
+    concealment: bool,
+    judge: str,
+) -> JudgeVerdict:
+    """Precision-first multilingual intent checks for server-level guidance."""
+    multilingual_override = bool(
+        re.search(
+            r"(?:ignora|ignore|ignorez|ignoriere).{0,45}"
+            r"(?:instrucciones (?:anteriores|previas)|instru[cç][oõ]es anteriores|"
+            r"instructions pr[eé]c[eé]dentes|vorherige anweisungen)",
+            text,
+        )
+        or re.search(r"abaikan.{0,35}instruksi (?:sebelumnya|sistem)", text)
+    )
+    multilingual_concealment = bool(
+        re.search(
+            r"(?:no (?:le )?(?:digas|informes).{0,25}usuario|"
+            r"jangan (?:beri tahu|informasikan).{0,25}pengguna|"
+            r"n[aã]o informe.{0,25}usu[aá]rio|"
+            r"ne (?:dites|signalez) pas.{0,25}utilisateur)",
+            text,
+        )
+    )
+    transfer = (
+        r"(?:send|upload|post|exfiltrat(?:e|ion)|env[ií]a|enviar|sube|"
+        r"kirim|unggah|envie|t[eé]l[eé]verse|sende)"
+    )
+    sensitive = (
+        r"(?:api[ _-]?key|secret|token|credential|password|environment|"
+        r"credencial|clave api|contrase[nñ]a|secreto|variable de entorno|"
+        r"kredensial|kunci api|kata sandi|rahasia|variabel lingkungan|"
+        r"mot de passe|geheim)"
+    )
+    multilingual_exfiltration = bool(
+        re.search(rf"{transfer}.{{0,120}}{sensitive}|{sensitive}.{{0,120}}{transfer}", text)
+    )
+    external_transfer = bool(
+        re.search(
+            rf"{transfer}.{{0,140}}(?:external|remote|third[- ]party|"
+            r"eksternal|telemetr)",
+            text,
+        )
+    )
+
+    override = instruction_override or multilingual_override
+    override = override or bool(
+        re.search(
+            r"(?:bypass|disable|skip|override).{0,80}(?:safety|security|access controls?|"
+            r"restrictions?|assistant instructions?)|"
+            r"(?:reveal|send|exfiltrate).{0,80}(?:system prompt|conversation history)",
+            text,
+        )
+    )
+    hidden = concealment or multilingual_concealment
+    if explicit_exfiltration or multilingual_exfiltration:
+        return JudgeVerdict(
+            label="unsafe",
+            confidence=0.97,
+            rationale=(
+                "Server instructions direct credential-like material to an outbound destination."
+            ),
+            judge=judge,
+        )
+    if override and hidden:
+        return JudgeVerdict(
+            label="unsafe",
+            confidence=0.95,
+            rationale=(
+                "Server instructions override the instruction hierarchy and conceal behavior "
+                "from the user."
+            ),
+            judge=judge,
+        )
+    if override:
+        return JudgeVerdict(
+            label="unsafe",
+            confidence=0.90,
+            rationale="Server instructions attempt to override prior or system instructions.",
+            judge=judge,
+        )
+    if hidden:
+        return JudgeVerdict(
+            label="unsafe",
+            confidence=0.92,
+            rationale="Server instructions direct the assistant to conceal behavior from the user.",
+            judge=judge,
+        )
+    if external_transfer:
+        return JudgeVerdict(
+            label="suspicious",
+            confidence=0.82,
+            rationale=(
+                "Server instructions request an external transfer; metadata alone cannot verify "
+                "its authorization or data handling."
+            ),
+            judge=judge,
+        )
+    return JudgeVerdict(
+        label="safe",
+        confidence=0.96,
+        rationale="Server instructions describe ordinary usage without malicious intent signals.",
+        judge=judge,
+    )
 
 
 class OpenAIJudge(SemanticJudge):

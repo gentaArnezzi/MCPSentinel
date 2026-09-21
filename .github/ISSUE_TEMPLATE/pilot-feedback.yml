@@ -1,0 +1,23 @@
+name: Pilot feedback
+description: Share a real integration result or a detection-quality issue.
+title: "[Pilot] "
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Scanner version, Python/OS, CLI or Action, transport, judge, threshold.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What happened?
+      description: Expected result, observed finding IDs, latency, and integration friction. Never include credentials or private metadata.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Safe reproduction or public workflow link
+      description: Optional sanitized metadata you are authorized to share, or a public CI run demonstrating usage.

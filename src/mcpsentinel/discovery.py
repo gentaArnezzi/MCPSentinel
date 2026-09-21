@@ -531,6 +531,9 @@ async def discover(target: TargetConfig) -> tuple[list[ToolDescriptor], dict[str
                 metadata = {
                     "server": server_info,
                     "protocol_version": client.protocol_version,
+                    "capabilities": sorted(
+                        key for key, value in capabilities.items() if value is not None
+                    ),
                     "negotiation": (
                         "server_discover"
                         if client.session.discover_result is not None

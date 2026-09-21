@@ -1,4 +1,13 @@
 # PRD — MCPSentinel
+
+> Implementation note (2026-09-21): this is the original product proposal, not a
+> statement of verified capabilities or current competitor performance. See the
+> [v0.8.8 assessment](docs/AUDIT-v0.8.8.md) for requirement-by-requirement status.
+> The actual PyPI distribution is `mcp-guardian-scan`; the CLI is `mcpsentinel`.
+> The default judge is offline heuristic, and dynamic testing requires explicit
+> ownership and invocation approval. Comparative accuracy and adoption KPIs below
+> remain goals; they have not been established by the regression datasets.
+
 ### Semantic-Layer Security Scanner untuk Model Context Protocol (MCP) Servers
 
 | | |

@@ -1,0 +1,263 @@
+{
+  "case_count": 428,
+  "dataset": "datasets/curated_public_metadata_v2/manifest.json",
+  "dataset_sha256": "dd04a88d05466f3cd0ed381f9f88836d77b070be1df98f156f18af81dd9acfcf",
+  "dataset_version": 2,
+  "estimated_api_cost_usd": 0.0,
+  "evaluation_scope": "public-metadata-negative-control",
+  "judge": "heuristic-v4",
+  "labeled_positive_count": 0,
+  "per_category": {
+    "command_execution": {
+      "semantic": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      },
+      "static": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      }
+    },
+    "cross_server_attack": {
+      "semantic": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      },
+      "static": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      }
+    },
+    "destructive_operation": {
+      "semantic": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      },
+      "static": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      }
+    },
+    "oauth_confused_deputy": {
+      "semantic": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      },
+      "static": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      }
+    },
+    "prompt_injection": {
+      "semantic": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 856,
+        "true_positive": 0
+      },
+      "static": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 856,
+        "true_positive": 0
+      }
+    },
+    "secret_exfiltration": {
+      "semantic": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      },
+      "static": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      }
+    },
+    "ssrf": {
+      "semantic": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      },
+      "static": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      }
+    },
+    "tool_poisoning": {
+      "semantic": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      },
+      "static": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      }
+    },
+    "tool_shadowing": {
+      "semantic": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      },
+      "static": {
+        "f1": null,
+        "false_negative": 0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": null,
+        "recall": null,
+        "true_negative": 428,
+        "true_positive": 0
+      }
+    }
+  },
+  "provenance_counts": {
+    "source-attributed-public-metadata": 428
+  },
+  "rule_count": 10,
+  "scanner_version": "0.8.8",
+  "semantic": {
+    "f1": null,
+    "false_negative": 0,
+    "false_positive": 0,
+    "false_positive_rate": 0.0,
+    "precision": null,
+    "recall": null,
+    "true_negative": 4280,
+    "true_positive": 0
+  },
+  "semantic_assessment_count": 0,
+  "semantic_descriptors": {
+    "f1": null,
+    "false_negative": 0,
+    "false_positive": 0,
+    "false_positive_rate": 0.0,
+    "precision": null,
+    "recall": null,
+    "true_negative": 428,
+    "true_positive": 0
+  },
+  "semantic_duration_ms": 0,
+  "semantic_report_count": 0,
+  "semantic_threshold": 0.7,
+  "server_instruction_segments": {},
+  "source_count": 2,
+  "static": {
+    "f1": null,
+    "false_negative": 0,
+    "false_positive": 0,
+    "false_positive_rate": 0.0,
+    "precision": null,
+    "recall": null,
+    "true_negative": 4280,
+    "true_positive": 0
+  },
+  "static_candidate_count": 0,
+  "static_descriptors": {
+    "f1": null,
+    "false_negative": 0,
+    "false_positive": 0,
+    "false_positive_rate": 0.0,
+    "precision": null,
+    "recall": null,
+    "true_negative": 428,
+    "true_positive": 0
+  },
+  "static_duration_ms": 55
+}

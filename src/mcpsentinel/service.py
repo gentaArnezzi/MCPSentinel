@@ -6,11 +6,17 @@ import asyncio
 from hmac import compare_digest
 from pathlib import Path
 
-from .baseline import BaselineStore, definition_fingerprint, stable_hash
+from .baseline import (
+    BaselineStore,
+    definition_fingerprint,
+    duplicate_descriptor_keys,
+    stable_hash,
+)
 from .discovery import discover
 from .dynamic import DynamicConfig, run_dynamic_validation
 from .models import (
     Category,
+    DescriptorKind,
     Finding,
     JudgeVerdict,
     ScanReport,
@@ -21,7 +27,12 @@ from .models import (
 )
 from .policy import load_policy
 from .rules import StaticAnalyzer, load_rules
-from .semantic import SemanticJudge, build_judge
+from .semantic import (
+    SERVER_INSTRUCTION_RULE_ID,
+    SemanticJudge,
+    build_judge,
+    server_instruction_candidates,
+)
 
 MAX_SEMANTIC_CONCURRENCY = 4
 
@@ -43,6 +54,7 @@ async def scan(
     dynamic_config: DynamicConfig | None = None,
 ) -> ScanReport:
     """Run discovery → static candidates → semantic triage → baseline diff."""
+    started_at = utc_now()
     if update_baseline:
         raise BaselineApprovalError(
             "Scanning cannot approve a baseline. Review the definition fingerprint, then run "
@@ -57,14 +69,16 @@ async def scan(
         target=target,
         descriptors=descriptors,
         findings=[],
-        started_at=utc_now(),
+        started_at=started_at,
         judge=judge.identity,
         discovery_metadata=discovery_metadata,
-        definition_fingerprint=definition_fingerprint(target, descriptors),
+        definition_fingerprint=definition_fingerprint(target, descriptors, discovery_metadata),
     )
+    duplicate_findings = _duplicate_descriptor_findings(descriptors)
+    report.findings.extend(duplicate_findings)
 
     analyzer = StaticAnalyzer(rules)
-    candidates = analyzer.analyze(descriptors)
+    candidates = analyzer.analyze(descriptors) + server_instruction_candidates(descriptors)
     policy_denials = [candidate for candidate in candidates if policy.denies(candidate)]
     report.findings.extend(policy.finding_for_denial(candidate) for candidate in policy_denials)
     semantic_candidates = [
@@ -77,25 +91,39 @@ async def scan(
     )
     report.findings.extend(await _semantic_findings(semantic_candidates, judge, store, threshold))
     report.findings.extend(_descriptor_limit_findings(descriptors))
-    comparison = store.compare(target, descriptors)
-    report.baseline_state = (
-        "missing"
-        if not comparison.prior_exists
-        else "changed"
-        if comparison.findings
-        else "unchanged"
-    )
-    report.findings.extend(comparison.findings)
-    if not comparison.prior_exists:
-        report.notices.append(
-            "No approved baseline exists. Review this scan's definition fingerprint, then use "
-            "'mcpsentinel baseline approve ... --fingerprint sha256:<fingerprint>'."
+    comparison = store.compare(target, descriptors, discovery_metadata)
+    if duplicate_findings:
+        report.baseline_state = "ambiguous"
+        report.findings.extend(
+            finding for finding in comparison.findings if finding.rule_id == "MCP-B002"
         )
-    elif comparison.findings:
         report.notices.append(
-            "The approved baseline was preserved. Review the changed definition fingerprint before "
-            "approving it with 'mcpsentinel baseline approve'."
+            "Baseline descriptor comparison was skipped because duplicate descriptor identities "
+            "make this catalog ambiguous. Approval is disabled until every identity is unique."
         )
+    else:
+        report.baseline_state = (
+            "reapproval_required"
+            if comparison.reapproval_required
+            else "missing"
+            if not comparison.prior_exists
+            else "changed"
+            if comparison.findings
+            else "unchanged"
+        )
+        report.findings.extend(comparison.findings)
+        if comparison.notice:
+            report.notices.append(comparison.notice)
+        elif not comparison.prior_exists:
+            report.notices.append(
+                "No approved baseline exists. Review this scan's definition fingerprint, then use "
+                "'mcpsentinel baseline approve ... --fingerprint sha256:<fingerprint>'."
+            )
+        elif comparison.findings:
+            report.notices.append(
+                "The approved baseline was preserved. Review the changed definition fingerprint "
+                "before approving it with 'mcpsentinel baseline approve'."
+            )
     if dynamic_config is not None:
         dynamic = await run_dynamic_validation(dynamic_config, report.findings)
         report.dynamic_observations.extend(dynamic.observations)
@@ -122,14 +150,20 @@ async def approve_baseline(
 ) -> str:
     """Rediscover and approve only the exact definition a human previously reviewed."""
     expected = _normalise_fingerprint(reviewed_fingerprint)
-    descriptors, _ = await discover(target)
-    current = definition_fingerprint(target, descriptors)
+    descriptors, discovery_metadata = await discover(target)
+    duplicates = duplicate_descriptor_keys(descriptors)
+    if duplicates:
+        raise BaselineApprovalError(
+            "Baseline approval refused: the MCP catalog contains duplicate descriptor "
+            "identities: " + ", ".join(duplicates) + "."
+        )
+    current = definition_fingerprint(target, descriptors, discovery_metadata)
     if not compare_digest(current, expected):
         raise BaselineApprovalError(
             "Baseline approval refused: the MCP definition changed after the reviewed scan. "
             f"Reviewed: sha256:{expected}. Current: sha256:{current}."
         )
-    BaselineStore(baseline_root).save_snapshot(target, descriptors)
+    BaselineStore(baseline_root).save_snapshot(target, descriptors, discovery_metadata)
     return current
 
 
@@ -181,6 +215,42 @@ def _descriptor_limit_findings(descriptors) -> list[Finding]:
     return findings
 
 
+def _duplicate_descriptor_findings(descriptors) -> list[Finding]:
+    """Reject ambiguous descriptor catalogs before baselining collapses their keys."""
+    counts: dict[str, int] = {}
+    for descriptor in descriptors:
+        counts[descriptor.key] = counts.get(descriptor.key, 0) + 1
+    findings: list[Finding] = []
+    for key in duplicate_descriptor_keys(descriptors):
+        kind, name = key.split(":", maxsplit=1)
+        try:
+            subject_kind = DescriptorKind(kind)
+        except ValueError:
+            subject_kind = DescriptorKind.TOOL
+        findings.append(
+            Finding(
+                rule_id="MCP-N002",
+                title="Duplicate MCP descriptor identity",
+                category=Category.PROTOCOL_INTEGRITY,
+                severity=Severity.MEDIUM,
+                message=(
+                    f"The server returned {counts[key]} definitions for '{key}', making the "
+                    "descriptor catalog ambiguous."
+                ),
+                subject_kind=subject_kind,
+                subject_name=name,
+                evidence=(f"Duplicate identity: {key}; count={counts[key]}.",),
+                confidence=0.99,
+                layers=("normalization", "protocol"),
+                rationale=(
+                    "Descriptor identities must be unique before MCPSentinel can establish an "
+                    "exact trusted definition."
+                ),
+            )
+        )
+    return findings
+
+
 async def _semantic_findings(
     candidates: list[StaticCandidate],
     judge: SemanticJudge,
@@ -221,7 +291,11 @@ async def _semantic_findings(
                 subject_name=candidate.descriptor.name,
                 evidence=candidate.evidence,
                 confidence=verdict.confidence,
-                layers=("static", "semantic"),
+                layers=(
+                    ("semantic",)
+                    if candidate.rule_id == SERVER_INSTRUCTION_RULE_ID
+                    else ("static", "semantic")
+                ),
                 rationale=verdict.rationale,
             )
         )
